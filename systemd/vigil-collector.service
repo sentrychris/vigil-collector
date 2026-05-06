@@ -1,0 +1,25 @@
+[Unit]
+Description=Vigil Collector - System Monitoring Utility
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=<user>
+Group=<group>
+# Optional — present only when this collector pushes to a Vigil Pro hub.
+# Format:
+#   VIGIL_COLLECTOR_HUB=ws://hub.example.com:4600/ingest
+#   VIGIL_COLLECTOR_HUB_KEY=<api_key from POST /api/hosts>
+#   VIGIL_COLLECTOR_HUB_NAME=<hostname>
+#   VIGIL_COLLECTOR_HUB_TAGS=prod,web
+# The leading dash makes the unit start fine without it (collector-only mode).
+EnvironmentFile=-/etc/vigil-collector/hub.env
+ExecStart=/usr/local/bin/vigil-collector --port=4700 --address=0.0.0.0
+Restart=on-failure
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

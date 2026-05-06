@@ -1,0 +1,1482 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#0b1220">
+    <title>Vigil Collector — Web Dashboard</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@500;600;700&family=Lato:wght@300;400;700&family=Montserrat:wght@300;400;500;600&display=swap" rel="stylesheet">
+
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+
+    <style>
+        /* ───────────────────────────────────────────────
+           TOKENS — Vigil design language
+           ─────────────────────────────────────────────── */
+        :root {
+            --bg-0: #060a14;
+            --bg-1: #0b1220;
+            --bg-2: #111827;
+            --bg-3: #1e293b;
+
+            --line: rgba(96, 165, 250, 0.14);
+            --line-strong: rgba(96, 165, 250, 0.32);
+
+            --text: #f1f5f9;
+            --text-secondary: #cbd5e1;
+            --text-mute: #94a3b8;
+            --text-dim: #64748b;
+
+            --blue:    #60a5fa;
+            --cyan:    #22d3ee;
+            --emerald: #34d399;
+            --purple:  #c084fc;
+            --amber:   #fbbf24;
+            --rose:    #f43f5e;
+            --fuchsia: #d946ef;
+
+            --shadow-glass:
+                0 1px 0 rgba(255, 255, 255, 0.04) inset,
+                0 8px 24px -8px rgba(0, 0, 0, 0.55),
+                0 28px 56px -18px rgba(0, 0, 0, 0.6),
+                0 0 0 1px rgba(96, 165, 250, 0.05);
+            --shadow-drama:
+                0 30px 80px -20px rgba(2, 6, 23, 0.7),
+                0 0 0 1px rgba(96, 165, 250, 0.06) inset;
+
+            --header-grad: linear-gradient(135deg, #111827 0%, #1e293b 100%);
+        }
+
+        *, *::before, *::after { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            font-family: "Lato", system-ui, -apple-system, sans-serif;
+            font-weight: 300;
+            font-size: 14px;
+            line-height: 1.55;
+            color: var(--text);
+            background: var(--bg-0);
+            min-height: 100vh;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            overflow-x: hidden;
+        }
+
+        h1, h2, h3, h4, h5 {
+            font-family: "IBM Plex Sans", system-ui, sans-serif;
+            font-weight: 600;
+            letter-spacing: -0.01em;
+            margin: 0;
+            color: var(--text);
+        }
+        code, kbd, pre, .mono {
+            font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        }
+
+        /* ───────────────────────────────────────────────
+           ATMOSPHERE — fixed behind everything
+           ─────────────────────────────────────────────── */
+        .atmosphere {
+            position: fixed; inset: 0;
+            z-index: -1; pointer-events: none;
+            background: var(--bg-0);
+        }
+        .atmosphere::before {
+            content: "";
+            position: absolute; inset: 0;
+            background-image:
+                linear-gradient(rgba(96, 165, 250, 0.05) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(96, 165, 250, 0.05) 1px, transparent 1px);
+            background-size: 48px 48px;
+            mask-image: radial-gradient(ellipse at center top, black 30%, transparent 75%);
+            -webkit-mask-image: radial-gradient(ellipse at center top, black 30%, transparent 75%);
+            opacity: 0.55;
+        }
+        .atmosphere::after {
+            content: "";
+            position: absolute; inset: 0;
+            background:
+                radial-gradient(60vw 60vw at 12% -10%,  rgba(59, 130, 246, 0.22), transparent 60%),
+                radial-gradient(50vw 50vw at 100% 0%,   rgba(34, 211, 238, 0.18), transparent 60%),
+                radial-gradient(80vw 80vw at 50% 110%,  rgba(168, 85, 247, 0.12), transparent 60%);
+            animation: atmoShift 24s ease-in-out infinite alternate;
+        }
+        @keyframes atmoShift {
+            0%   { transform: translate3d(0, 0, 0); }
+            100% { transform: translate3d(0, -2%, 0); }
+        }
+
+        /* ───────────────────────────────────────────────
+           NAV
+           ─────────────────────────────────────────────── */
+        .v-nav {
+            position: sticky; top: 0; z-index: 50;
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            background: linear-gradient(180deg, rgba(11, 18, 32, 0.85), rgba(11, 18, 32, 0.55));
+            border-bottom: 1px solid var(--line);
+        }
+        .v-nav-inner {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 0.85rem 1.5rem; gap: 1rem;
+        }
+        .brand {
+            display: inline-flex; align-items: center; gap: 0.7rem;
+            font-family: "IBM Plex Sans", system-ui, sans-serif;
+        }
+        .brand-dot {
+            width: 10px; height: 10px; border-radius: 50%;
+            background: var(--rose);
+            box-shadow: 0 0 12px rgba(244, 63, 94, 0.6);
+            transition: background 220ms ease, box-shadow 220ms ease;
+        }
+        .brand-dot.live {
+            background: var(--emerald);
+            box-shadow: 0 0 12px var(--emerald);
+            animation: livePulse 1.6s ease-in-out infinite;
+        }
+        @keyframes livePulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50%      { opacity: 0.55; transform: scale(0.85); }
+        }
+        .brand-name { font-weight: 700; font-size: 1.05rem; letter-spacing: -0.01em; color: var(--text); }
+        .brand-pill {
+            margin-left: 0.4rem; padding: 0.18rem 0.5rem; border-radius: 999px;
+            font-family: "IBM Plex Mono", monospace;
+            font-size: 0.62rem; font-weight: 500;
+            color: var(--cyan);
+            background: rgba(34, 211, 238, 0.08);
+            border: 1px solid rgba(34, 211, 238, 0.25);
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+        }
+        .nav-meta {
+            display: inline-flex; align-items: center; gap: 1.25rem;
+            font-family: "IBM Plex Mono", monospace;
+            font-size: 0.72rem;
+            color: var(--text-dim);
+            letter-spacing: 0.04em;
+        }
+        .nav-meta .item { display: inline-flex; align-items: center; gap: 0.45rem; }
+        .nav-meta .item i { color: var(--text-mute); font-size: 0.85rem; }
+        .nav-meta .item [data-field] { color: var(--text-secondary); }
+        @media (max-width: 820px) { .nav-meta { display: none; } }
+
+        /* ───────────────────────────────────────────────
+           PANEL — the workhorse surface
+           ─────────────────────────────────────────────── */
+        .panel {
+            border-radius: 14px;
+            background: rgba(15, 23, 42, 0.55);
+            border: 1px solid rgba(148, 163, 184, 0.14);
+            box-shadow: var(--shadow-glass);
+            backdrop-filter: blur(18px) saturate(140%);
+            -webkit-backdrop-filter: blur(18px) saturate(140%);
+            overflow: hidden;
+            transition: transform 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+        }
+        .panel:hover {
+            transform: translateY(-1px);
+            border-color: rgba(96, 165, 250, 0.28);
+        }
+        .panel-body { padding: 0.95rem 1rem 1rem; }
+
+        /* Section header used inside panels */
+        .section-header {
+            position: relative;
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 0.6rem 1rem;
+            background: var(--header-grad);
+            color: var(--text);
+            overflow: hidden;
+            border-bottom: 1px solid rgba(96, 165, 250, 0.22);
+            gap: 0.75rem;
+        }
+        .section-header::before {
+            content: "";
+            position: absolute; inset: 0;
+            background-image:
+                linear-gradient(rgba(96, 165, 250, 0.04) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(96, 165, 250, 0.04) 1px, transparent 1px);
+            background-size: 32px 32px;
+            opacity: 0.6;
+            pointer-events: none;
+        }
+        .section-header::after {
+            content: "";
+            position: absolute; inset: 0;
+            background:
+                radial-gradient(800px circle at 0% 0%, rgba(59, 130, 246, 0.14), transparent 50%),
+                radial-gradient(600px circle at 100% 100%, rgba(34, 211, 238, 0.08), transparent 50%);
+            pointer-events: none;
+        }
+        .section-header > * { position: relative; z-index: 1; }
+        .sh-left { display: inline-flex; align-items: center; gap: 0.7rem; min-width: 0; }
+        .sh-title {
+            font-family: "IBM Plex Sans", system-ui, sans-serif;
+            font-weight: 600;
+            font-size: 0.78rem;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+            line-height: 1.15;
+            color: var(--text);
+        }
+        .sh-sub {
+            font-family: "IBM Plex Mono", monospace;
+            font-size: 0.625rem;
+            color: var(--text-dim);
+            letter-spacing: 0.1em;
+            margin-top: 2px;
+            text-transform: uppercase;
+        }
+
+        /* ───────────────────────────────────────────────
+           TONE TILES
+           ─────────────────────────────────────────────── */
+        .tile {
+            display: inline-flex; align-items: center; justify-content: center;
+            flex-shrink: 0;
+        }
+        .tile.tone-blue    { background: rgba(59,130,246,0.15);  color: var(--blue);    box-shadow: inset 0 0 0 1px rgba(59,130,246,0.25); }
+        .tile.tone-cyan    { background: rgba(34,211,238,0.15);  color: var(--cyan);    box-shadow: inset 0 0 0 1px rgba(34,211,238,0.25); }
+        .tile.tone-emerald { background: rgba(16,185,129,0.15);  color: var(--emerald); box-shadow: inset 0 0 0 1px rgba(16,185,129,0.25); }
+        .tile.tone-purple  { background: rgba(168,85,247,0.15);  color: var(--purple);  box-shadow: inset 0 0 0 1px rgba(168,85,247,0.25); }
+        .tile.tone-amber   { background: rgba(245,158,11,0.15);  color: var(--amber);   box-shadow: inset 0 0 0 1px rgba(245,158,11,0.25); }
+        .tile.tone-rose    { background: rgba(239,68,68,0.15);   color: #f87171;        box-shadow: inset 0 0 0 1px rgba(239,68,68,0.25); }
+        .tile.tone-slate   { background: rgba(148,163,184,0.12); color: var(--text-secondary); box-shadow: inset 0 0 0 1px rgba(148,163,184,0.2); }
+        .tile-sm { width: 24px; height: 24px; border-radius: 6px; font-size: 11px; }
+        .tile-md { width: 30px; height: 30px; border-radius: 8px; font-size: 14px; }
+        .tile-lg { width: 38px; height: 38px; border-radius: 10px; font-size: 16px; }
+
+        /* ───────────────────────────────────────────────
+           CHIPS / PILLS / EYEBROWS
+           ─────────────────────────────────────────────── */
+        .chip {
+            display: inline-flex; align-items: center; gap: 0.45rem;
+            padding: 0.32rem 0.7rem;
+            border-radius: 6px;
+            font-family: "IBM Plex Mono", monospace;
+            font-size: 0.625rem;
+            font-weight: 700;
+            letter-spacing: 0.16em;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            white-space: nowrap;
+            text-transform: uppercase;
+            color: var(--text-mute);
+        }
+        .chip-dot {
+            width: 7px; height: 7px; border-radius: 50%;
+            background: currentColor;
+            box-shadow: 0 0 10px currentColor;
+        }
+        .chip.live { color: var(--emerald); border-color: rgba(52, 211, 153, 0.28); background: rgba(52, 211, 153, 0.08); }
+        .chip.live .chip-dot { animation: livePulse 1.4s ease-in-out infinite; }
+        .chip.idle { color: var(--amber); border-color: rgba(251, 191, 36, 0.28); background: rgba(251, 191, 36, 0.08); }
+        .chip.crit { color: #f87171; border-color: rgba(244, 63, 94, 0.28); background: rgba(244, 63, 94, 0.08); }
+        .chip.info { color: var(--blue); border-color: rgba(96, 165, 250, 0.28); background: rgba(96, 165, 250, 0.08); }
+        .chip.purple { color: var(--purple); border-color: rgba(192, 132, 252, 0.28); background: rgba(192, 132, 252, 0.08); }
+
+        .eyebrow {
+            font-family: "IBM Plex Mono", monospace;
+            font-size: 0.625rem;
+            font-weight: 700;
+            letter-spacing: 0.22em;
+            text-transform: uppercase;
+            color: var(--text-dim);
+        }
+
+        /* ───────────────────────────────────────────────
+           BUTTONS
+           ─────────────────────────────────────────────── */
+        .v-btn {
+            display: inline-flex; align-items: center; gap: 0.45rem;
+            padding: 0.5rem 0.95rem;
+            border-radius: 999px;
+            font-family: "IBM Plex Sans", system-ui, sans-serif;
+            font-weight: 600; font-size: 0.78rem; letter-spacing: 0.02em;
+            cursor: pointer;
+            border: 1px solid var(--line-strong);
+            background: rgba(255, 255, 255, 0.03);
+            color: var(--text);
+            transition: transform 180ms ease, box-shadow 180ms ease,
+                        background 180ms ease, border-color 180ms ease, color 180ms ease;
+            white-space: nowrap;
+        }
+        .v-btn:hover {
+            transform: translateY(-1px);
+            background: rgba(255, 255, 255, 0.06);
+            border-color: rgba(96, 165, 250, 0.5);
+            color: var(--text);
+        }
+        .v-btn:disabled,
+        .v-btn[disabled] { opacity: 0.5; cursor: not-allowed; transform: none; }
+        .v-btn i { font-size: 0.85rem; }
+
+        .v-btn-primary {
+            background: linear-gradient(135deg, var(--blue), var(--cyan));
+            border-color: transparent;
+            color: #0b1220;
+            box-shadow:
+                0 12px 30px -12px rgba(34, 211, 238, 0.55),
+                inset 0 0 0 1px rgba(255, 255, 255, 0.25);
+        }
+        .v-btn-primary:hover {
+            color: #0b1220;
+            background: linear-gradient(135deg, var(--blue), var(--cyan));
+            border-color: transparent;
+            box-shadow:
+                0 16px 40px -12px rgba(34, 211, 238, 0.7),
+                inset 0 0 0 1px rgba(255, 255, 255, 0.35);
+        }
+        .v-btn-danger {
+            border-color: rgba(244, 63, 94, 0.4);
+            color: #fda4af;
+        }
+        .v-btn-danger:hover {
+            border-color: rgba(244, 63, 94, 0.6);
+            background: rgba(244, 63, 94, 0.1);
+            color: #fecdd3;
+        }
+
+        /* ───────────────────────────────────────────────
+           TABS
+           ─────────────────────────────────────────────── */
+        .v-tabs {
+            display: flex; flex-wrap: wrap; gap: 0.25rem;
+            border-bottom: 1px solid var(--line);
+            margin: 0; padding: 0; list-style: none;
+        }
+        .v-tab {
+            display: inline-flex; align-items: center; gap: 0.5rem;
+            padding: 0.7rem 1rem;
+            background: transparent;
+            border: none;
+            border-bottom: 2px solid transparent;
+            color: var(--text-mute);
+            font-family: "IBM Plex Sans", system-ui, sans-serif;
+            font-size: 0.78rem;
+            font-weight: 500;
+            letter-spacing: 0.04em;
+            cursor: pointer;
+            transition: color 160ms ease, border-color 160ms ease, background 160ms ease;
+        }
+        .v-tab i { font-size: 0.9rem; }
+        .v-tab:hover { color: var(--text); background: rgba(255, 255, 255, 0.02); }
+        .v-tab.active {
+            color: var(--cyan);
+            border-bottom-color: var(--cyan);
+        }
+
+        /* ───────────────────────────────────────────────
+           STAT CARDS (the metric grid)
+           ─────────────────────────────────────────────── */
+        .stat-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 0.7rem;
+        }
+        .stat {
+            background: rgba(255, 255, 255, 0.018);
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            padding: 0.65rem 0.8rem 0.75rem;
+            transition: border-color 180ms ease, background 180ms ease;
+        }
+        .stat:hover { border-color: rgba(96, 165, 250, 0.22); }
+        .stat .label {
+            font-family: "IBM Plex Mono", monospace;
+            font-size: 0.62rem;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            letter-spacing: 0.16em;
+            font-weight: 600;
+            display: flex; align-items: center; gap: 0.35rem;
+        }
+        .stat .value {
+            font-family: "Montserrat", "IBM Plex Mono", monospace;
+            font-feature-settings: "tnum";
+            font-variant-numeric: tabular-nums;
+            font-size: 1.35rem;
+            font-weight: 400;
+            color: var(--text);
+            line-height: 1.15;
+            margin-top: 0.35rem;
+            letter-spacing: 0.005em;
+        }
+        .stat .value small {
+            font-size: 0.7rem;
+            color: var(--text-mute);
+            font-weight: 400;
+            margin-left: 0.2rem;
+        }
+        .stat .value.text-md { font-size: 0.95rem; font-family: "IBM Plex Sans", system-ui, sans-serif; font-weight: 500; }
+
+        /* ───────────────────────────────────────────────
+           METER / BAR
+           ─────────────────────────────────────────────── */
+        .bar {
+            height: 6px;
+            border-radius: 999px;
+            overflow: hidden;
+            background: rgba(148, 163, 184, 0.14);
+            margin-top: 0.55rem;
+        }
+        .bar > span {
+            display: block; height: 100%;
+            border-radius: inherit;
+            background: linear-gradient(90deg, var(--blue), var(--cyan));
+            width: 0%;
+            transition: width 380ms cubic-bezier(.2,.8,.2,1);
+        }
+        .bar.warn > span   { background: linear-gradient(90deg, var(--amber), #fb923c); }
+        .bar.danger > span { background: linear-gradient(90deg, var(--rose), #ef4444); }
+
+        .mini-bar {
+            height: 4px;
+            background: rgba(148, 163, 184, 0.12);
+            border-radius: 999px;
+            overflow: hidden;
+            min-width: 80px;
+        }
+        .mini-bar > span {
+            display: block; height: 100%;
+            background: linear-gradient(90deg, var(--purple), var(--cyan));
+        }
+
+        /* ───────────────────────────────────────────────
+           TABLES
+           ─────────────────────────────────────────────── */
+        .v-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.82rem;
+            color: var(--text-secondary);
+        }
+        .v-table thead th {
+            font-family: "IBM Plex Mono", monospace;
+            color: var(--text-dim);
+            font-size: 0.65rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.16em;
+            border-bottom: 1px solid var(--line);
+            padding: 0.7rem 0.85rem;
+            background: rgba(15, 23, 42, 0.4);
+            text-align: left;
+        }
+        .v-table thead th.text-end { text-align: right; }
+        .v-table tbody td {
+            padding: 0.65rem 0.85rem;
+            border-bottom: 1px solid var(--line);
+            vertical-align: middle;
+        }
+        .v-table tbody tr:last-child td { border-bottom: 0; }
+        .v-table tbody tr:hover td { background: rgba(96, 165, 250, 0.03); }
+        .v-table .text-end { text-align: right; }
+        .v-table .ps-4 { padding-left: 1.1rem; }
+        .v-table .pe-4 { padding-right: 1.1rem; }
+        .v-table .empty {
+            text-align: center;
+            color: var(--text-dim);
+            padding: 2rem 1rem;
+            font-family: "IBM Plex Mono", monospace;
+            font-size: 0.78rem;
+        }
+
+        /* ───────────────────────────────────────────────
+           CONNECTION STRIP
+           ─────────────────────────────────────────────── */
+        .connection-strip {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 0.85rem;
+            padding: 0.9rem 1.1rem;
+        }
+        .connection-strip .vsep {
+            width: 1px; height: 24px;
+            background: var(--line);
+        }
+        .connection-strip .last-update {
+            margin-left: auto;
+            font-family: "IBM Plex Mono", monospace;
+            font-size: 0.7rem;
+            color: var(--text-dim);
+            letter-spacing: 0.04em;
+        }
+
+        /* ───────────────────────────────────────────────
+           LOG / TERMINAL PANE
+           ─────────────────────────────────────────────── */
+        .log-pane {
+            background: #0a0e18;
+            border: 1px solid var(--line-strong);
+            border-radius: 8px;
+            padding: 0.7rem 0.85rem;
+            height: 320px;
+            overflow-y: auto;
+            font-family: "IBM Plex Mono", monospace;
+            font-size: 0.74rem;
+            line-height: 1.6;
+            color: var(--text-secondary);
+            box-shadow: var(--shadow-drama);
+        }
+        .log-pane p { margin: 0 0 0.18rem; word-wrap: break-word; }
+        .log-pane p .ts { color: var(--text-dim); margin-right: 0.5rem; letter-spacing: 0.04em; }
+        .log-pane .ev-info  { color: var(--text-secondary); }
+        .log-pane .ev-ok    { color: var(--emerald); }
+        .log-pane .ev-warn  { color: var(--amber); }
+        .log-pane .ev-error { color: #f87171; }
+
+        pre.json {
+            background: #0a0e18;
+            border: 1px solid var(--line-strong);
+            border-radius: 8px;
+            padding: 0.95rem 1.05rem;
+            color: var(--text-secondary);
+            font-family: "IBM Plex Mono", monospace;
+            font-size: 0.76rem;
+            line-height: 1.6;
+            max-height: 420px;
+            overflow: auto;
+            margin: 0;
+            box-shadow: var(--shadow-drama);
+        }
+        .json-key    { color: var(--purple); }
+        .json-string { color: var(--emerald); }
+        .json-number { color: var(--amber); }
+        .json-bool   { color: #f9a8d4; }
+        .json-null   { color: var(--text-mute); }
+
+        /* ───────────────────────────────────────────────
+           INTERFACE PILLS (network tab)
+           ─────────────────────────────────────────────── */
+        .iface-row {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 0.55rem 0.75rem;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.018);
+            font-family: "IBM Plex Mono", monospace;
+            font-size: 0.78rem;
+            color: var(--text-secondary);
+            transition: border-color 180ms ease, background 180ms ease;
+        }
+        .iface-row:hover { border-color: rgba(96, 165, 250, 0.22); }
+        .iface-row .name { display: inline-flex; align-items: center; gap: 0.5rem; }
+        .iface-row .name i { color: var(--text-dim); }
+
+        /* ───────────────────────────────────────────────
+           UTILITIES
+           ─────────────────────────────────────────────── */
+        .container-page {
+            width: min(1400px, 95%);
+            margin: 0 auto;
+            padding: 1.5rem 0 3rem;
+        }
+        .grid-tabs { padding-top: 1.25rem; }
+        .grid-row { display: grid; gap: 1rem; }
+        .cols-3 { grid-template-columns: repeat(3, 1fr); }
+        .cols-2 { grid-template-columns: repeat(2, 1fr); }
+        .cols-4-1 { grid-template-columns: 1fr 2fr; }
+        .cols-2-3 { grid-template-columns: 5fr 7fr; }
+        @media (max-width: 1100px) { .cols-3, .cols-4-1, .cols-2-3 { grid-template-columns: 1fr; } }
+        @media (max-width: 760px) { .cols-2 { grid-template-columns: 1fr; } }
+
+        .text-mute { color: var(--text-mute); }
+        .text-dim  { color: var(--text-dim); }
+        .text-ok   { color: var(--emerald); }
+        .text-warn { color: var(--amber); }
+        .text-bad  { color: #f87171; }
+        .text-cyan { color: var(--cyan); }
+        .text-blue { color: var(--blue); }
+        .text-purple { color: var(--purple); }
+
+        .footer-meta {
+            margin-top: 2rem;
+            padding-top: 1.5rem;
+            border-top: 1px solid var(--line);
+            text-align: center;
+            font-family: "IBM Plex Mono", monospace;
+            font-size: 0.7rem;
+            color: var(--text-dim);
+            letter-spacing: 0.06em;
+        }
+        .footer-meta code {
+            color: var(--cyan);
+            background: rgba(34, 211, 238, 0.06);
+            border: 1px solid rgba(34, 211, 238, 0.18);
+            padding: 0.1rem 0.4rem;
+            border-radius: 4px;
+            font-size: 0.85em;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after {
+                animation-duration: 0.01ms !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: 0.01ms !important;
+            }
+            .atmosphere::after { animation: none; }
+        }
+    </style>
+</head>
+<body>
+    <div class="atmosphere"></div>
+
+    <header class="v-nav">
+        <div class="v-nav-inner">
+            <a href="#" class="brand">
+                <span class="brand-dot" id="status-dot"></span>
+                <span class="brand-name">Vigil Collector</span>
+                <span class="brand-pill">Web</span>
+            </a>
+            <div class="nav-meta">
+                <span class="item" id="hdr-distro"><i class="bi bi-pc-display"></i><span data-field>—</span></span>
+                <span class="item" id="hdr-user"><i class="bi bi-person-circle"></i><span data-field>—</span></span>
+                <span class="item" id="hdr-uptime"><i class="bi bi-clock-history"></i><span data-field>—</span></span>
+            </div>
+        </div>
+    </header>
+
+    <main class="container-page">
+
+        <!-- Connection bar -->
+        <div class="panel" style="margin-bottom: 1.25rem;">
+            <div class="connection-strip">
+                <span class="chip" id="ws-status"><span class="chip-dot"></span>Disconnected</span>
+                <span class="eyebrow">WebSocket</span>
+                <span class="vsep"></span>
+                <button class="v-btn v-btn-primary" id="ws-open"><i class="bi bi-play-fill"></i>Stream</button>
+                <button class="v-btn v-btn-danger" id="ws-close"><i class="bi bi-stop-fill"></i>Disconnect</button>
+                <span class="vsep"></span>
+                <button class="v-btn" id="get-system"><i class="bi bi-arrow-down-circle"></i>GET /system</button>
+                <button class="v-btn" id="get-network"><i class="bi bi-arrow-down-circle"></i>GET /network</button>
+                <button class="v-btn" id="get-probes"><i class="bi bi-arrow-down-circle"></i>GET /probes</button>
+                <button class="v-btn" id="post-worker"><i class="bi bi-arrow-up-circle"></i>POST /worker</button>
+                <span class="last-update" id="last-update">No data yet</span>
+            </div>
+        </div>
+
+        <!-- Tabs -->
+        <ul class="v-tabs" role="tablist">
+            <li><button class="v-tab active" data-tab="tab-overview"><i class="bi bi-speedometer2"></i>Overview</button></li>
+            <li><button class="v-tab" data-tab="tab-disks"><i class="bi bi-hdd-stack"></i>Disks</button></li>
+            <li><button class="v-tab" data-tab="tab-network"><i class="bi bi-diagram-3"></i>Network</button></li>
+            <li><button class="v-tab" data-tab="tab-processes"><i class="bi bi-cpu"></i>Processes</button></li>
+            <li><button class="v-tab" data-tab="tab-probes"><i class="bi bi-broadcast"></i>Probes</button></li>
+            <li><button class="v-tab" data-tab="tab-raw"><i class="bi bi-braces"></i>Raw &amp; Logs</button></li>
+        </ul>
+
+        <div class="grid-tabs">
+
+            <!-- OVERVIEW -->
+            <section class="tab-pane active" id="tab-overview">
+                <div class="grid-row cols-3">
+
+                    <div class="panel">
+                        <div class="section-header">
+                            <div class="sh-left">
+                                <div class="tile tile-md tone-blue"><i class="bi bi-cpu-fill"></i></div>
+                                <div>
+                                    <div class="sh-title">CPU</div>
+                                    <div class="sh-sub">PROCESSOR · LOAD</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="panel-body">
+                            <div class="stat-grid">
+                                <div class="stat">
+                                    <div class="label">Usage</div>
+                                    <div class="value"><span id="cpu-usage">--</span><small>%</small></div>
+                                    <div class="bar" id="cpu-meter"><span></span></div>
+                                </div>
+                                <div class="stat">
+                                    <div class="label">Temperature</div>
+                                    <div class="value"><span id="cpu-temp">--</span><small>°C</small></div>
+                                </div>
+                                <div class="stat">
+                                    <div class="label">Frequency</div>
+                                    <div class="value"><span id="cpu-freq">--</span><small>MHz</small></div>
+                                </div>
+                                <div class="stat">
+                                    <div class="label">Cores</div>
+                                    <div class="value"><span id="cpu-cores">--</span></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="panel">
+                        <div class="section-header">
+                            <div class="sh-left">
+                                <div class="tile tile-md tone-purple"><i class="bi bi-memory"></i></div>
+                                <div>
+                                    <div class="sh-title">Memory</div>
+                                    <div class="sh-sub">RAM · UTILIZATION</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="panel-body">
+                            <div class="stat-grid">
+                                <div class="stat">
+                                    <div class="label">Used</div>
+                                    <div class="value"><span id="mem-used">--</span><small>GiB</small></div>
+                                    <div class="bar" id="mem-meter"><span></span></div>
+                                </div>
+                                <div class="stat">
+                                    <div class="label">Free</div>
+                                    <div class="value"><span id="mem-free">--</span><small>GiB</small></div>
+                                </div>
+                                <div class="stat">
+                                    <div class="label">Total</div>
+                                    <div class="value"><span id="mem-total">--</span><small>GiB</small></div>
+                                </div>
+                                <div class="stat">
+                                    <div class="label">Percent</div>
+                                    <div class="value"><span id="mem-percent">--</span><small>%</small></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="panel">
+                        <div class="section-header">
+                            <div class="sh-left">
+                                <div class="tile tile-md tone-cyan"><i class="bi bi-hdd-fill"></i></div>
+                                <div>
+                                    <div class="sh-title">Primary Disk</div>
+                                    <div class="sh-sub">ROOT · CAPACITY</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="panel-body">
+                            <div class="stat-grid">
+                                <div class="stat">
+                                    <div class="label">Used</div>
+                                    <div class="value"><span id="disk-used">--</span><small>GiB</small></div>
+                                    <div class="bar" id="disk-meter"><span></span></div>
+                                </div>
+                                <div class="stat">
+                                    <div class="label">Free</div>
+                                    <div class="value"><span id="disk-free">--</span><small>GiB</small></div>
+                                </div>
+                                <div class="stat">
+                                    <div class="label">Total</div>
+                                    <div class="value"><span id="disk-total">--</span><small>GiB</small></div>
+                                </div>
+                                <div class="stat">
+                                    <div class="label">Percent</div>
+                                    <div class="value"><span id="disk-percent">--</span><small>%</small></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="grid-row cols-2" style="margin-top: 1rem;">
+
+                    <div class="panel">
+                        <div class="section-header">
+                            <div class="sh-left">
+                                <div class="tile tile-md tone-emerald"><i class="bi bi-arrow-down-up"></i></div>
+                                <div>
+                                    <div class="sh-title">Network Throughput</div>
+                                    <div class="sh-sub">RX / TX · AGGREGATE</div>
+                                </div>
+                            </div>
+                            <span class="chip info">REALTIME</span>
+                        </div>
+                        <div class="panel-body">
+                            <div class="stat-grid">
+                                <div class="stat">
+                                    <div class="label"><i class="bi bi-arrow-down text-ok"></i>Receive</div>
+                                    <div class="value"><span id="net-rx">--</span></div>
+                                </div>
+                                <div class="stat">
+                                    <div class="label"><i class="bi bi-arrow-up text-purple"></i>Transmit</div>
+                                    <div class="value"><span id="net-tx">--</span></div>
+                                </div>
+                            </div>
+                            <p class="text-mute" style="margin: 0.85rem 0 0; font-size: 0.78rem;">
+                                Aggregate across all non-loopback interfaces. Updates with each WebSocket frame.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="panel">
+                        <div class="section-header">
+                            <div class="sh-left">
+                                <div class="tile tile-md tone-amber"><i class="bi bi-hdd-network"></i></div>
+                                <div>
+                                    <div class="sh-title">Disk I/O</div>
+                                    <div class="sh-sub">READ / WRITE · IOPS</div>
+                                </div>
+                            </div>
+                            <span class="chip info">REALTIME</span>
+                        </div>
+                        <div class="panel-body">
+                            <div class="stat-grid">
+                                <div class="stat">
+                                    <div class="label"><i class="bi bi-arrow-down text-ok"></i>Read</div>
+                                    <div class="value"><span id="disk-read">--</span></div>
+                                    <div class="label" style="margin-top: 0.4rem;"><span id="disk-read-iops">--</span>&nbsp;IOPS</div>
+                                </div>
+                                <div class="stat">
+                                    <div class="label"><i class="bi bi-arrow-up text-purple"></i>Write</div>
+                                    <div class="value"><span id="disk-write">--</span></div>
+                                    <div class="label" style="margin-top: 0.4rem;"><span id="disk-write-iops">--</span>&nbsp;IOPS</div>
+                                </div>
+                            </div>
+                            <p class="text-mute" style="margin: 0.85rem 0 0; font-size: 0.78rem;">
+                                Aggregate across all physical disks. Updates with each WebSocket frame.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="panel" style="grid-column: 1 / -1;">
+                        <div class="section-header">
+                            <div class="sh-left">
+                                <div class="tile tile-md tone-slate"><i class="bi bi-info-circle"></i></div>
+                                <div>
+                                    <div class="sh-title">Host</div>
+                                    <div class="sh-sub">DISTRIBUTION · KERNEL</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="panel-body">
+                            <div class="stat-grid">
+                                <div class="stat">
+                                    <div class="label">Distribution</div>
+                                    <div class="value text-md"><span id="host-distro">--</span></div>
+                                </div>
+                                <div class="stat">
+                                    <div class="label">Kernel</div>
+                                    <div class="value text-md"><span id="host-kernel">--</span></div>
+                                </div>
+                                <div class="stat">
+                                    <div class="label">User</div>
+                                    <div class="value text-md"><span id="host-user">--</span></div>
+                                </div>
+                                <div class="stat">
+                                    <div class="label">Uptime</div>
+                                    <div class="value text-md"><span id="host-uptime">--</span></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </section>
+
+            <!-- DISKS -->
+            <section class="tab-pane" id="tab-disks" hidden>
+                <div class="panel">
+                    <div class="section-header">
+                        <div class="sh-left">
+                            <div class="tile tile-md tone-cyan"><i class="bi bi-hdd-stack"></i></div>
+                            <div>
+                                <div class="sh-title">Mounted Partitions</div>
+                                <div class="sh-sub">FILESYSTEMS · UTILIZATION</div>
+                            </div>
+                        </div>
+                        <span class="chip purple"><span class="mono" id="disk-count">0</span></span>
+                    </div>
+                    <div>
+                        <table class="v-table">
+                            <thead>
+                                <tr>
+                                    <th class="ps-4">Device</th>
+                                    <th>Mountpoint</th>
+                                    <th>FS</th>
+                                    <th class="text-end">Used</th>
+                                    <th class="text-end">Free</th>
+                                    <th class="text-end">Total</th>
+                                    <th style="width: 28%;">Utilization</th>
+                                </tr>
+                            </thead>
+                            <tbody id="disks-tbody">
+                                <tr><td colspan="7" class="empty">No data — fetch <code>/system</code> or stream WebSocket.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- NETWORK -->
+            <section class="tab-pane" id="tab-network" hidden>
+                <div class="grid-row cols-4-1">
+
+                    <div class="panel">
+                        <div class="section-header">
+                            <div class="sh-left">
+                                <div class="tile tile-md tone-emerald"><i class="bi bi-ethernet"></i></div>
+                                <div>
+                                    <div class="sh-title">Interfaces</div>
+                                    <div class="sh-sub">DETECTED · NICs</div>
+                                </div>
+                            </div>
+                            <span class="chip purple"><span class="mono" id="iface-count">0</span></span>
+                        </div>
+                        <div class="panel-body">
+                            <div id="iface-list" style="display: flex; flex-direction: column; gap: 0.45rem;">
+                                <p class="text-mute" style="font-size: 0.78rem; margin: 0;">No data — fetch <code>/network</code>.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="panel">
+                        <div class="section-header">
+                            <div class="sh-left">
+                                <div class="tile tile-md tone-blue"><i class="bi bi-graph-up"></i></div>
+                                <div>
+                                    <div class="sh-title">Per-Interface Counters</div>
+                                    <div class="sh-sub">RX · TX · ERR · DROP</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div>
+                            <table class="v-table">
+                                <thead>
+                                    <tr>
+                                        <th class="ps-4">Interface</th>
+                                        <th class="text-end">RX (MiB)</th>
+                                        <th class="text-end">TX (MiB)</th>
+                                        <th class="text-end">RX pkt</th>
+                                        <th class="text-end">TX pkt</th>
+                                        <th class="text-end">Err in/out</th>
+                                        <th class="text-end pe-4">Drop in/out</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="netstats-tbody">
+                                    <tr><td colspan="7" class="empty">No data — fetch <code>/network</code>.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- PROCESSES -->
+            <section class="tab-pane" id="tab-processes" hidden>
+                <div class="panel">
+                    <div class="section-header">
+                        <div class="sh-left">
+                            <div class="tile tile-md tone-purple"><i class="bi bi-list-ol"></i></div>
+                            <div>
+                                <div class="sh-title">Top Processes by Memory</div>
+                                <div class="sh-sub">RANKED · LIVE</div>
+                            </div>
+                        </div>
+                        <div style="display: inline-flex; align-items: center; gap: 0.6rem;">
+                            <span class="chip purple" id="proc-metric">RSS</span>
+                            <span class="text-dim" id="proc-note" style="font-size: 0.7rem; font-family: 'IBM Plex Mono', monospace;"></span>
+                        </div>
+                    </div>
+                    <div>
+                        <table class="v-table">
+                            <thead>
+                                <tr>
+                                    <th class="ps-4" style="width: 4rem;">#</th>
+                                    <th>Process</th>
+                                    <th>User</th>
+                                    <th class="text-end">PID</th>
+                                    <th class="text-end pe-4">Memory (MiB)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="processes-tbody">
+                                <tr><td colspan="5" class="empty">No data — fetch <code>/system</code> or stream WebSocket.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- PROBES -->
+            <section class="tab-pane" id="tab-probes" hidden>
+                <div class="panel">
+                    <div class="section-header">
+                        <div class="sh-left">
+                            <div class="tile tile-md tone-rose"><i class="bi bi-broadcast"></i></div>
+                            <div>
+                                <div class="sh-title">External Service Probes</div>
+                                <div class="sh-sub">HTTP · LATENCY</div>
+                            </div>
+                        </div>
+                        <span class="text-dim" style="font-size: 0.7rem; font-family: 'IBM Plex Mono', monospace;">Allowlist: <code>~/.vigil-collector/settings.json</code></span>
+                    </div>
+                    <div>
+                        <table class="v-table">
+                            <thead>
+                                <tr>
+                                    <th class="ps-4">Status</th>
+                                    <th>Name</th>
+                                    <th>URL</th>
+                                    <th class="text-end">HTTP</th>
+                                    <th class="text-end pe-4">Latency</th>
+                                </tr>
+                            </thead>
+                            <tbody id="probes-tbody">
+                                <tr><td colspan="5" class="empty">No data — fetch <code>/probes</code>.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- RAW + LOGS -->
+            <section class="tab-pane" id="tab-raw" hidden>
+                <div class="grid-row cols-2-3">
+
+                    <div class="panel">
+                        <div class="section-header">
+                            <div class="sh-left">
+                                <div class="tile tile-md tone-amber"><i class="bi bi-list-task"></i></div>
+                                <div>
+                                    <div class="sh-title">Event Log</div>
+                                    <div class="sh-sub">CLIENT · TIMELINE</div>
+                                </div>
+                            </div>
+                            <button class="v-btn" id="clear-events" style="padding: 0.35rem 0.7rem; font-size: 0.7rem;"><i class="bi bi-trash"></i>Clear</button>
+                        </div>
+                        <div class="panel-body">
+                            <div id="event-log" class="log-pane"></div>
+                        </div>
+                    </div>
+
+                    <div class="panel">
+                        <div class="section-header">
+                            <div class="sh-left">
+                                <div class="tile tile-md tone-cyan"><i class="bi bi-braces"></i></div>
+                                <div>
+                                    <div class="sh-title">Latest Payload</div>
+                                    <div class="sh-sub">JSON · FROM <span id="payload-source">—</span></div>
+                                </div>
+                            </div>
+                            <button class="v-btn" id="copy-payload" style="padding: 0.35rem 0.7rem; font-size: 0.7rem;"><i class="bi bi-clipboard"></i>Copy</button>
+                        </div>
+                        <div class="panel-body">
+                            <pre class="json" id="payload-pre">// No payload yet — request an endpoint or open the WebSocket stream.</pre>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+        </div>
+
+        <p class="footer-meta">
+            VIGIL COLLECTOR · serves <code>/system</code> · <code>/network</code> · <code>/probes</code> · <code>POST /worker</code> · <code>/connect</code> WebSocket
+        </p>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        (() => {
+            const $ = (sel, root = document) => root.querySelector(sel);
+            const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+
+            const time = () => {
+                const d = new Date();
+                const pad = (n) => String(n).padStart(2, "0");
+                return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+            };
+
+            const formatBytesPerSec = (bps) => {
+                if (bps == null || isNaN(bps)) return "--";
+                const units = ["B/s", "KiB/s", "MiB/s", "GiB/s"];
+                let v = Number(bps), i = 0;
+                while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+                return `${v.toFixed(v >= 100 ? 0 : v >= 10 ? 1 : 2)} ${units[i]}`;
+            };
+
+            const meterClass = (pct) => pct >= 90 ? "danger" : pct >= 75 ? "warn" : "";
+            const setMeter = (el, pct) => {
+                if (!el) return;
+                const v = Math.max(0, Math.min(100, Number(pct) || 0));
+                el.classList.remove("warn", "danger");
+                const cls = meterClass(v);
+                if (cls) el.classList.add(cls);
+                $("span", el).style.width = `${v}%`;
+            };
+
+            const setText = (id, value) => {
+                const el = document.getElementById(id);
+                if (el && value !== undefined && value !== null && value !== "") el.textContent = value;
+            };
+
+            // Tab switcher
+            $$(".v-tab").forEach((btn) => {
+                btn.addEventListener("click", () => {
+                    const target = btn.dataset.tab;
+                    $$(".v-tab").forEach((b) => b.classList.toggle("active", b === btn));
+                    $$(".tab-pane").forEach((pane) => {
+                        const isActive = pane.id === target;
+                        pane.classList.toggle("active", isActive);
+                        pane.hidden = !isActive;
+                    });
+                });
+            });
+
+            const log = {
+                root: $("#event-log"),
+                write(level, message) {
+                    const node = document.createElement("p");
+                    node.className = `ev-${level}`;
+                    node.innerHTML = `<span class="ts">[${time()}]</span>${escapeHTML(message)}`;
+                    this.root.appendChild(node);
+                    this.root.scrollTop = this.root.scrollHeight;
+                },
+                clear() {
+                    this.root.innerHTML = "";
+                    this.write("info", "Event log cleared");
+                }
+            };
+
+            const escapeHTML = (s) => String(s).replace(/[&<>"']/g, (c) => ({
+                "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;"
+            }[c]));
+
+            const syntaxHighlight = (json) => {
+                return escapeHTML(json).replace(
+                    /("(\\u[a-fA-F0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g,
+                    (match) => {
+                        let cls = "json-number";
+                        if (/^"/.test(match)) cls = /:$/.test(match) ? "json-key" : "json-string";
+                        else if (/true|false/.test(match)) cls = "json-bool";
+                        else if (/null/.test(match)) cls = "json-null";
+                        return `<span class="${cls}">${match}</span>`;
+                    }
+                );
+            };
+
+            const showPayload = (source, data) => {
+                $("#payload-source").textContent = source;
+                $("#payload-pre").innerHTML = syntaxHighlight(JSON.stringify(data, null, 2));
+                $("#last-update").textContent = `Last update ${time()} · ${source}`;
+            };
+
+            const renderSystem = (data) => {
+                if (data.cpu) {
+                    setText("cpu-usage", data.cpu.usage);
+                    setText("cpu-temp", data.cpu.temp);
+                    setText("cpu-freq", data.cpu.freq);
+                    setText("cpu-cores", data.cpu.cores);
+                    setMeter($("#cpu-meter"), data.cpu.usage);
+                }
+                if (data.mem) {
+                    setText("mem-used", data.mem.used);
+                    setText("mem-free", data.mem.free);
+                    setText("mem-total", data.mem.total);
+                    setText("mem-percent", data.mem.percent);
+                    setMeter($("#mem-meter"), data.mem.percent);
+                }
+                if (data.disk) {
+                    setText("disk-used", data.disk.used);
+                    setText("disk-free", data.disk.free);
+                    setText("disk-total", data.disk.total);
+                    setText("disk-percent", data.disk.percent);
+                    setMeter($("#disk-meter"), data.disk.percent);
+                }
+                if (data.network) {
+                    setText("net-rx", formatBytesPerSec(data.network.rx_bytes_per_sec));
+                    setText("net-tx", formatBytesPerSec(data.network.tx_bytes_per_sec));
+                }
+                if (data.disk_io) {
+                    setText("disk-read", formatBytesPerSec(data.disk_io.read_bytes_per_sec));
+                    setText("disk-write", formatBytesPerSec(data.disk_io.write_bytes_per_sec));
+                    setText("disk-read-iops", data.disk_io.read_iops);
+                    setText("disk-write-iops", data.disk_io.write_iops);
+                }
+                if (data.platform) {
+                    setText("host-distro", data.platform.distro);
+                    setText("host-kernel", data.platform.kernel);
+                    setText("host-uptime", data.platform.uptime);
+                    $("#hdr-distro [data-field]").textContent = data.platform.distro || "—";
+                    $("#hdr-uptime [data-field]").textContent = data.platform.uptime || "—";
+                }
+                if (data.user) {
+                    setText("host-user", data.user);
+                    $("#hdr-user [data-field]").textContent = data.user;
+                }
+                if (Array.isArray(data.disks)) renderDisks(data.disks);
+                if (Array.isArray(data.processes)) renderProcesses(data.processes, data.processes_metric);
+            };
+
+            const renderDisks = (disks) => {
+                $("#disk-count").textContent = disks.length;
+                const tbody = $("#disks-tbody");
+                if (!disks.length) {
+                    tbody.innerHTML = `<tr><td colspan="7" class="empty">No partitions reported.</td></tr>`;
+                    return;
+                }
+                tbody.innerHTML = disks.map((d) => {
+                    const pct = Number(d.percent) || 0;
+                    const cls = meterClass(pct);
+                    return `<tr>
+                        <td class="ps-4 mono">${escapeHTML(d.device || "—")}</td>
+                        <td class="mono">${escapeHTML(d.mountpoint || "—")}</td>
+                        <td><span class="chip purple">${escapeHTML(d.fstype || "—")}</span></td>
+                        <td class="text-end mono">${d.used} <span class="text-dim">GiB</span></td>
+                        <td class="text-end mono">${d.free} <span class="text-dim">GiB</span></td>
+                        <td class="text-end mono">${d.total} <span class="text-dim">GiB</span></td>
+                        <td>
+                            <div style="display:flex;align-items:center;gap:.6rem;">
+                                <div class="bar ${cls}" style="flex:1;margin-top:0;"><span style="width:${pct}%"></span></div>
+                                <span class="mono" style="min-width:3rem;text-align:right;font-size:.78rem;">${pct}%</span>
+                            </div>
+                        </td>
+                    </tr>`;
+                }).join("");
+            };
+
+            const renderProcesses = (procs, metric) => {
+                $("#proc-metric").textContent = (metric || "rss").toUpperCase();
+                $("#proc-note").textContent = metric === "pss"
+                    ? "PSS — shared memory split fairly across processes"
+                    : "RSS — shared libraries counted against each process";
+                const tbody = $("#processes-tbody");
+                if (!procs.length) {
+                    tbody.innerHTML = `<tr><td colspan="5" class="empty">No processes.</td></tr>`;
+                    return;
+                }
+                const max = Math.max(...procs.map((p) => Number(p.mem) || 0), 1);
+                tbody.innerHTML = procs.map((p, i) => {
+                    const mem = Number(p.mem) || 0;
+                    const w = Math.round((mem / max) * 100);
+                    return `<tr>
+                        <td class="ps-4 text-dim mono">${i + 1}</td>
+                        <td class="mono" style="color:var(--text);">${escapeHTML(p.name || "—")}</td>
+                        <td class="text-mute" style="font-size:.78rem;">${escapeHTML(p.username || "—")}</td>
+                        <td class="text-end text-dim mono">${escapeHTML(String(p.pid ?? "—"))}</td>
+                        <td class="text-end pe-4">
+                            <div style="display:flex;align-items:center;gap:.5rem;justify-content:flex-end;">
+                                <div class="mini-bar"><span style="width:${w}%"></span></div>
+                                <span class="mono" style="min-width:3.5rem;text-align:right;">${mem.toFixed(2)}</span>
+                            </div>
+                        </td>
+                    </tr>`;
+                }).join("");
+            };
+
+            const renderNetwork = (data) => {
+                const interfaces = data.interfaces || [];
+                const stats = data.statistics || {};
+
+                $("#iface-count").textContent = interfaces.length;
+                const ifaceList = $("#iface-list");
+                if (!interfaces.length) {
+                    ifaceList.innerHTML = `<p class="text-mute" style="font-size:.78rem;margin:0;">No interfaces.</p>`;
+                } else {
+                    ifaceList.innerHTML = interfaces.map((nic) => `
+                        <div class="iface-row">
+                            <span class="name"><i class="bi bi-${nic === "lo" ? "arrow-repeat" : "ethernet"}"></i>${escapeHTML(nic)}</span>
+                            ${nic === "lo" ? '<span class="chip">loopback</span>' : ''}
+                        </div>
+                    `).join("");
+                }
+
+                const tbody = $("#netstats-tbody");
+                const entries = Object.entries(stats);
+                if (!entries.length) {
+                    tbody.innerHTML = `<tr><td colspan="7" class="empty">No counters.</td></tr>`;
+                    return;
+                }
+                tbody.innerHTML = entries.map(([nic, s]) => `
+                    <tr>
+                        <td class="ps-4 mono" style="color:var(--text);">${escapeHTML(nic)}</td>
+                        <td class="text-end mono">${(s.mb_received || 0).toFixed(2)}</td>
+                        <td class="text-end mono">${(s.mb_sent || 0).toFixed(2)}</td>
+                        <td class="text-end mono text-dim">${s.pk_received ?? 0}</td>
+                        <td class="text-end mono text-dim">${s.pk_sent ?? 0}</td>
+                        <td class="text-end mono ${(s.error_in || s.error_out) ? 'text-warn' : 'text-dim'}">${s.error_in ?? 0} / ${s.error_out ?? 0}</td>
+                        <td class="text-end pe-4 mono ${(s.dropin || s.dropout) ? 'text-warn' : 'text-dim'}">${s.dropin ?? 0} / ${s.dropout ?? 0}</td>
+                    </tr>
+                `).join("");
+            };
+
+            const renderProbes = (data) => {
+                const probes = data.probes || [];
+                const tbody = $("#probes-tbody");
+                if (!probes.length) {
+                    tbody.innerHTML = `<tr><td colspan="5" class="empty">No probes configured. Edit <code>~/.vigil-collector/settings.json</code>.</td></tr>`;
+                    return;
+                }
+                tbody.innerHTML = probes.map((p) => {
+                    const okBadge = p.ok
+                        ? '<span class="chip live"><span class="chip-dot"></span>UP</span>'
+                        : '<span class="chip crit"><span class="chip-dot"></span>DOWN</span>';
+                    const status = p.status_code != null ? p.status_code : '—';
+                    const statusCls = p.status_code == null ? 'text-dim' : (p.status_code < 400 ? 'text-ok' : 'text-bad');
+                    return `<tr>
+                        <td class="ps-4">${okBadge}</td>
+                        <td style="color:var(--text);">${escapeHTML(p.name || "—")}</td>
+                        <td class="mono text-mute" style="font-size:.76rem;">${escapeHTML(p.url || "")}${p.error ? `<div class="text-bad" style="font-size:.7rem;margin-top:.15rem;">${escapeHTML(p.error)}</div>` : ''}</td>
+                        <td class="text-end mono ${statusCls}">${status}</td>
+                        <td class="text-end pe-4 mono">${p.latency_ms} <span class="text-dim">ms</span></td>
+                    </tr>`;
+                }).join("");
+            };
+
+            const setWsStatus = (state) => {
+                const chip = $("#ws-status");
+                const dot = $("#status-dot");
+                chip.className = "chip";
+                dot.classList.remove("live");
+                if (state === "connected") {
+                    chip.classList.add("live");
+                    chip.innerHTML = '<span class="chip-dot"></span>Connected';
+                    dot.classList.add("live");
+                } else if (state === "connecting") {
+                    chip.classList.add("idle");
+                    chip.innerHTML = '<span class="chip-dot"></span>Connecting…';
+                } else if (state === "error") {
+                    chip.classList.add("crit");
+                    chip.innerHTML = '<span class="chip-dot"></span>Error';
+                } else {
+                    chip.innerHTML = '<span class="chip-dot"></span>Disconnected';
+                }
+            };
+
+            // Endpoint handlers
+            const fetchSystem = async () => {
+                log.write("info", "GET /system …");
+                try {
+                    const r = await fetch(`${location.origin}/system`);
+                    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                    const data = await r.json();
+                    renderSystem(data);
+                    showPayload("/system", data);
+                    log.write("ok", "/system OK");
+                } catch (e) {
+                    log.write("error", `/system failed: ${e.message}`);
+                }
+            };
+
+            const fetchNetwork = async () => {
+                log.write("info", "GET /network …");
+                try {
+                    const r = await fetch(`${location.origin}/network`);
+                    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                    const data = await r.json();
+                    renderNetwork(data);
+                    showPayload("/network", data);
+                    log.write("ok", `/network OK (${(data.interfaces || []).length} interfaces)`);
+                } catch (e) {
+                    log.write("error", `/network failed: ${e.message}`);
+                }
+            };
+
+            const fetchProbes = async () => {
+                log.write("info", "GET /probes …");
+                try {
+                    const r = await fetch(`${location.origin}/probes`);
+                    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                    const data = await r.json();
+                    renderProbes(data);
+                    showPayload("/probes", data);
+                    const up = (data.probes || []).filter((p) => p.ok).length;
+                    log.write("ok", `/probes OK (${up}/${(data.probes || []).length} up)`);
+                } catch (e) {
+                    log.write("error", `/probes failed: ${e.message}`);
+                }
+            };
+
+            const postWorker = async () => {
+                log.write("info", "POST /worker …");
+                try {
+                    const r = await fetch(`${location.origin}/worker`, { method: "POST" });
+                    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                    const data = await r.json();
+                    showPayload("POST /worker", data);
+                    log.write("ok", `Worker created: ${data.id}`);
+                    return data;
+                } catch (e) {
+                    log.write("error", `/worker failed: ${e.message}`);
+                    return null;
+                }
+            };
+
+            // WebSocket
+            let connection = null;
+
+            const openWs = async () => {
+                if (connection) {
+                    log.write("warn", "WebSocket already open");
+                    return;
+                }
+                setWsStatus("connecting");
+                const worker = await postWorker();
+                if (!worker || !worker.id) {
+                    setWsStatus("error");
+                    return;
+                }
+                const proto = location.protocol === "https:" ? "wss" : "ws";
+                const url = `${proto}://${location.host}/connect?id=${worker.id}`;
+                log.write("info", `Connecting WebSocket → ${url}`);
+                connection = new WebSocket(url);
+
+                connection.onopen = () => {
+                    setWsStatus("connected");
+                    log.write("ok", "WebSocket connected — streaming");
+                };
+                connection.onmessage = (ev) => {
+                    try {
+                        const data = JSON.parse(ev.data);
+                        renderSystem(data);
+                        showPayload("ws://connect", data);
+                    } catch (e) {
+                        log.write("warn", `Malformed frame: ${e.message}`);
+                    }
+                };
+                connection.onerror = () => {
+                    setWsStatus("error");
+                    log.write("error", "WebSocket error");
+                };
+                connection.onclose = () => {
+                    setWsStatus("disconnected");
+                    log.write("info", "WebSocket closed");
+                    connection = null;
+                };
+            };
+
+            const closeWs = () => {
+                if (!connection) {
+                    log.write("warn", "No WebSocket to close");
+                    return;
+                }
+                log.write("info", "Closing WebSocket …");
+                connection.close();
+            };
+
+            // Wire up
+            $("#get-system").addEventListener("click", fetchSystem);
+            $("#get-network").addEventListener("click", fetchNetwork);
+            $("#get-probes").addEventListener("click", fetchProbes);
+            $("#post-worker").addEventListener("click", postWorker);
+            $("#ws-open").addEventListener("click", openWs);
+            $("#ws-close").addEventListener("click", closeWs);
+            $("#clear-events").addEventListener("click", () => log.clear());
+            $("#copy-payload").addEventListener("click", async () => {
+                try {
+                    await navigator.clipboard.writeText($("#payload-pre").textContent);
+                    log.write("ok", "Payload copied to clipboard");
+                } catch (e) {
+                    log.write("error", `Copy failed: ${e.message}`);
+                }
+            });
+
+            // Auto-load on first visit so the dashboard isn't empty
+            log.write("info", "Dashboard ready — fetching initial snapshot");
+            fetchSystem();
+            fetchNetwork();
+        })();
+    </script>
+</body>
+</html>
