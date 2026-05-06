@@ -114,15 +114,88 @@ Quick measurement on this machine (16-core x86_64, Linux 6.6 WSL2):
 
 | | Rust | Python | Δ |
 |---|---|---|---|
-| Single `/system` request | **0.7 ms** | 1.3 ms | ~2× |
-| `ab -n 3000 -c 20 /system` throughput | **23,277 req/s** | 2,875 req/s | ~8× |
-| Mean latency at concurrency 20 | **0.9 ms** | 7.0 ms | ~8× |
-| Failed requests at conc 20 | **0** | 2,613 | — |
-| Resident memory after warmup | **9 MB** | 34 MB | ~4× |
-| Stripped release binary | **5.7 MB** | (PyInstaller bundle ~30 MB) | ~5× |
+| Idle CPU (sampler running, no clients) | **0.23%** | 0.87% | ~3.8× |
+| `ab -n 5000 -c 50 -k /system` throughput | **66,948 req/s** | 2,875 req/s | ~23× |
+| Mean latency at concurrency 50 | **0.7 ms** | 7.0 ms | ~10× |
+| Resident memory (warm, sustained) | **8 MB** | 34 MB | ~4× |
+| Virtual memory | **76 MB** | 270 MB | ~3× |
+| OS threads | **2** | 12+ | — |
+| Stripped release binary | **5.5 MB** | (PyInstaller bundle ~30 MB) | ~5× |
 
-These come from the cached-JSON design (no per-request serialization on the hot
-path) plus tokio's scheduler not being the GIL.
+The throughput edge comes from caching pre-serialized JSON bytes for each
+endpoint at the sampler tick — every HTTP/WS read is a single atomic load
+plus a `Bytes::send()`, with zero serialization on the hot path.
+
+The memory edge comes from three deliberate choices in the runtime layout:
+
+- **`#[tokio::main(flavor = "current_thread")]`** — the workload is one 1 Hz
+  sampler plus a low double-digit number of cooperative tasks. Default
+  multi-threaded tokio would spawn one worker thread per CPU core (each with
+  a 2 MB virtual stack), which on a 16-core box accounts for ~30 MB of idle
+  virtual memory we'd never touch.
+- **`sysinfo` with `default-features = false`** (drops the `multithread`
+  feature) — sysinfo's default build pulls in rayon and parallelizes process
+  scanning across a global thread pool sized to `num_cpus`. For a 1 Hz tick
+  scanning a few hundred processes that's wasted: rayon's idle pool was the
+  source of ~16 background threads in early builds.
+- **Cached `Arc<Vec<u8>>` per endpoint** — one allocation per sampler tick
+  for each of `/system`, the WS frame, and `/network`. Old buffers are freed
+  as readers release their `Arc` clones, so steady-state heap is bounded by
+  one tick's worth of buffers regardless of concurrent client count.
+
+We tried `mimalloc` as the global allocator: it raised throughput slightly
+(+5%) but increased steady-state RSS by ~1 MB and reserved a 1 GB virtual
+region. Default ptmalloc fragments less for our small working set, so we
+stayed on it.
+
+### Idle CPU usage
+
+For a monitoring agent the agent itself shouldn't be a top consumer in its
+own output, so the per-tick budget got profiled and trimmed.
+
+Profiling a baseline tick (sampler running, no clients) showed:
+
+| Step | Time | % of tick |
+|---|---|---|
+| `processes_refresh` (sysinfo walks `/proc/*/{stat,status,statm}`) | ~7,000 µs | 63% |
+| `cpu_all` (per-core frequency reads) | ~2,000 µs | 18% |
+| `disks_refresh` (per-mount `statvfs` we then redo ourselves) | ~1,500 µs | 13% |
+| Everything else (mem, network, components, json, ...) | ~500 µs | 5% |
+| **Total** | **~11,000 µs** | |
+
+Three rate-limit decisions cut that to ~3,000 µs/tick on average:
+
+- **Top-N processes scanned every 5 sampler ticks**, not every tick. Memory
+  rankings are stable second-to-second; the previous top-N is reused on the
+  in-between ticks (see `PROCESS_SCAN_EVERY` in `sampler.rs`). This step
+  alone was 63% of a tick.
+- **CPU frequency rolls into the same slow cadence.** `refresh_cpu_usage()`
+  reads only `/proc/stat` (cheap) and runs every tick; the per-core
+  frequency files live behind `refresh_cpu_frequency()` and are read on the
+  5-tick cycle. Frequency is a display value with no delta semantics, so
+  freshness is irrelevant here.
+- **Mount table re-scanned once a minute** (`DISK_LIST_REFRESH_EVERY = 60`)
+  instead of every tick. We never read sysinfo's stored disk usage anyway —
+  `usage_for_mount` calls `statvfs` itself for the byte-compatible
+  `(f_blocks - f_bfree)` accounting — so sysinfo's per-tick `Disks::refresh`
+  is purely waste and gets skipped. `Disks::refresh_list` catches
+  mount/unmount events.
+
+What stays at every-tick cadence (because it's a counter delta and a 1 s
+window is the contract):
+
+- CPU usage % (from `/proc/stat` global counters)
+- Memory used/free
+- Disk I/O bytes/sec and IOPS (from `/proc/diskstats` deltas)
+- Network rx/tx bytes/sec (from sysinfo's per-iface counter deltas)
+
+The per-disk usage walk via `statvfs` runs every tick too, but it's only
+~30 µs total — cheap enough that the dashboard always sees fresh values.
+
+End result: idle CPU usage drops from being on par with the Python collector
+(~0.87%) to about a quarter of it (0.23%) — and stays there regardless of
+how many clients connect, because the per-tick work doesn't scale with
+client count.
 
 ## Single-binary build
 

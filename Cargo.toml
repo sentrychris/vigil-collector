@@ -15,12 +15,12 @@ name = "vigil-collector"
 path = "src/main.rs"
 
 [dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "time", "sync", "net", "fs", "io-util"] }
+tokio = { version = "1", features = ["rt", "macros", "signal", "time", "sync", "net", "io-util"] }
 axum = { version = "0.7", features = ["ws"] }
 tower = "0.5"
 tower-http = { version = "0.6", features = ["cors"] }
 serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["preserve_order"] }
+serde_json = "1"
 clap = { version = "4", features = ["derive", "env"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "time"] }
@@ -28,7 +28,7 @@ tracing-appender = "0.2"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 tokio-tungstenite = { version = "0.24", default-features = false, features = ["rustls-tls-webpki-roots", "connect"] }
 arc-swap = "1"
-sysinfo = "0.32"
+sysinfo = { version = "0.32", default-features = false, features = ["component", "disk", "network", "system", "user"] }
 dirs = "5"
 gethostname = "0.5"
 whoami = "1"

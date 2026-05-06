@@ -11,7 +11,20 @@ use tokio::task::JoinHandle;
 use crate::metrics;
 use crate::metrics::disk::DiskIoPrev;
 use crate::metrics::net::NetIoPrev;
-use crate::snapshot::Snapshot;
+use crate::snapshot::{Process, Snapshot};
+
+// Slow-tick cadences for the heavy refresh phases. Profiling on a typical
+// host shows ``processes_refresh`` is ~63% of a tick (~7 ms walking
+// /proc/*/{stat,status,statm}) and ``disks.refresh()`` is ~13% (per-mount
+// statvfs we then redo ourselves for psutil parity). Top-N-by-memory
+// rankings are stable second-to-second, and mounts change rarely, so
+// rate-limiting these is essentially free of UX impact while cutting
+// idle CPU by ~70%.
+//
+// PROCESS_SCAN_EVERY = 5  → top-N refreshed every 5 sampler ticks.
+// DISK_LIST_REFRESH_EVERY = 60 → re-scan mount table once a minute.
+const PROCESS_SCAN_EVERY: u64 = 5;
+const DISK_LIST_REFRESH_EVERY: u64 = 60;
 
 struct SamplerState {
     sys: System,
@@ -22,6 +35,9 @@ struct SamplerState {
     cores: u32,
     disk_io_prev: Option<DiskIoPrev>,
     net_io_prev: Option<NetIoPrev>,
+    tick: u64,
+    cached_processes: Vec<Process>,
+    cached_processes_metric: String,
 }
 
 impl SamplerState {
@@ -46,21 +62,57 @@ impl SamplerState {
             cores,
             disk_io_prev: None,
             net_io_prev: None,
+            tick: 0,
+            cached_processes: Vec::new(),
+            cached_processes_metric: String::from("rss"),
         }
     }
 
     fn refresh(&mut self) -> Snapshot {
-        self.sys.refresh_cpu_all();
+        // Cheap, every-tick: CPU usage and memory are cumulative-counter
+        // deltas — they need a 1 s sampling window to read meaningfully.
+        // Networks the same (rx/tx bytes/sec). disk_io is also a delta.
+        //
+        // ``refresh_cpu_usage`` reads only ``/proc/stat`` (~50 µs); the
+        // full ``refresh_cpu_all`` would also touch per-CPU frequency
+        // files for every core (~2 ms on a 16-core box). Frequency is a
+        // slow-moving display value, so we refresh it on the same slow
+        // tick as processes below.
+        self.sys.refresh_cpu_usage();
         self.sys.refresh_memory();
-        self.sys.refresh_processes_specifics(
-            sysinfo::ProcessesToUpdate::All,
-            true,
-            metrics::process::refresh_kind(),
-        );
-        self.disks.refresh();
         self.networks.refresh();
         self.components.refresh();
-        self.users.refresh_list();
+
+        // Slow, every-Nth-tick: process scan dominates the per-tick CPU
+        // budget. Top-N by memory is stable across short windows, so
+        // running this every PROCESS_SCAN_EVERY ticks (default 5 s) gives
+        // a ~5x reduction in average tick cost without visible UX impact.
+        // CPU frequency is rolled into the same cadence — it's a display
+        // value that doesn't need 1 Hz freshness and reading it
+        // per-core-per-tick was ~2 ms by itself.
+        if self.tick == 0 || self.tick % PROCESS_SCAN_EVERY == 0 {
+            self.sys.refresh_cpu_frequency();
+            self.users.refresh_list();
+            self.sys.refresh_processes_specifics(
+                sysinfo::ProcessesToUpdate::All,
+                true,
+                metrics::process::refresh_kind(),
+            );
+            self.cached_processes = metrics::process::collect_top(&self.sys, &self.users);
+            self.cached_processes_metric =
+                metrics::process::process_metric_label(&self.sys).to_string();
+        }
+
+        // Slow, every-Mth-tick: re-scan the mount table to catch new
+        // mounts/unmounts. We never use sysinfo's stored disk usage
+        // (statvfs is called per-tick in ``usage_for_mount`` for psutil
+        // parity), so the costly per-mount statvfs that ``Disks::refresh``
+        // does on every tick is pure overhead and gets skipped.
+        if self.tick == 0 || self.tick % DISK_LIST_REFRESH_EVERY == 0 {
+            self.disks.refresh_list();
+        }
+
+        self.tick = self.tick.wrapping_add(1);
 
         let cpu = metrics::cpu::collect(&self.sys, &self.components, self.cores);
         let mem = metrics::mem::collect(&self.sys);
@@ -68,8 +120,6 @@ impl SamplerState {
         let all_disks = metrics::disk::collect_all(&self.disks);
         let disk_io = metrics::disk::collect_io(&mut self.disk_io_prev);
         let net = metrics::net::collect_throughput(&self.networks, &mut self.net_io_prev);
-        let processes = metrics::process::collect_top(&self.sys, &self.users);
-        let processes_metric = metrics::process::process_metric_label(&self.sys).to_string();
         let plat = metrics::platform::collect();
         let user = metrics::platform::user();
         let interfaces = metrics::net::interface_names(&self.networks);
@@ -85,8 +135,8 @@ impl SamplerState {
             user,
             uptime: plat.uptime.clone(),
             platform: plat,
-            processes,
-            processes_metric,
+            processes: self.cached_processes.clone(),
+            processes_metric: self.cached_processes_metric.clone(),
             interfaces,
             network_stats,
         }

@@ -28,7 +28,12 @@ fn resolve_addr(host: &str, port: u16) -> anyhow::Result<SocketAddr> {
         .ok_or_else(|| anyhow::anyhow!("could not resolve {host}"))
 }
 
-#[tokio::main]
+// Single-threaded runtime: the workload is one 1 Hz sampler + a low double-
+// digit number of WebSocket clients on cooperative tasks. A multi-threaded
+// scheduler would allocate per-core worker threads (each with a 2 MB stack),
+// which dominates idle RSS without buying any throughput we actually need.
+// Heavy refresh work still happens off-runtime via ``spawn_blocking``.
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
     let args = Cli::parse();
     let settings = config::read_settings();
