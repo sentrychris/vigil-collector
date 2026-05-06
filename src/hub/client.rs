@@ -160,9 +160,9 @@ async fn connect_and_push(
             HubFrame::Welcome { host_id, interval } => {
                 let interval = interval.unwrap_or(sampler_interval.as_secs_f64());
                 tracing::info!(
-                    "hub.connected: host={} host_id={:?} interval={:.2}s",
+                    "hub.connected: host={} host_id={} interval={:.2}s",
                     host_name,
-                    host_id,
+                    host_id.map(|id| id.to_string()).unwrap_or_else(|| "?".into()),
                     interval
                 );
                 Duration::from_secs_f64(interval.max(0.1))
