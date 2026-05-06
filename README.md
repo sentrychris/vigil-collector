@@ -1,81 +1,164 @@
-# Vigil Collector (Rust)
+# Vigil Collector
 
 A lightweight system and network monitoring server. Stream live host metrics to
-any client over HTTP or WebSocket. Wire-compatible with the Python
-[vigil-collector](https://github.com/sentrychris/vigil-collector) — same routes,
-same JSON shapes, same Vigil Pro hub protocol.
+any client over HTTP or WebSocket.
 
-This is a Rust rewrite of the original Python implementation. The HTTP/WS API
-and the Vigil Pro hub protocol are preserved byte-for-byte; existing clients
-([Vigil UI](https://github.com/sentrychris/vigil), Vigil Pro hub) work without
-modification.
+See it powering a real dashboard [here](https://status.edcs.app) — paired with
+[Vigil UI](https://github.com/sentrychris/vigil), the comprehensive frontend.
 
 ## Quick start
 
 ```sh
-git clone https://github.com/sentrychris/vigil-collector-rs && cd vigil-collector-rs
+git clone https://github.com/sentrychris/vigil-collector && cd vigil-collector
 cargo build --release
 ./target/release/vigil-collector
 ```
 
-Defaults to `localhost:4500`. Hit `http://localhost:4500/system` to confirm.
+Defaults to `localhost:4500`. Hit `http://localhost:4500/system` to confirm
+it's running.
 
 ```sh
 # custom address / port
 ./target/release/vigil-collector --address 0.0.0.0 --port 4500
 ```
 
-A settings file is created on first run at `~/.vigil-collector/settings.json`.
-The keys and defaults are unchanged from the Python version — see
+`Ctrl-C` (or `SIGTERM`) shuts everything down cleanly. A settings file is
+created on first run at `~/.vigil-collector/settings.json` — see
 [Configuration](#configuration).
 
 ## What you get
 
-- Live snapshot of CPU, memory, disk, disk I/O, network throughput, and top
-  processes — one sample per second by default.
-- Multi-disk reporting for every mounted partition, with reserved-block
-  accounting that matches `df` exactly.
-- External health checks via a configurable allowlist; `/probes` returns
-  reachability and latency for each entry.
-- PSS-aware process accounting on Linux (when readable), RSS otherwise — the
-  payload tells the UI which.
-- One sampler shared by N clients; each WebSocket frame is the cached JSON
-  bytes from the last tick, so connecting more dashboards adds zero sampling
-  cost.
+- **Live stream** of CPU, memory, disk, disk I/O, network throughput, and top
+  processes — one snapshot per second by default.
+- **Multi-disk** for every mounted partition, with reserved-block accounting
+  that matches `df` exactly.
+- **External health checks** using a configurable list of URLs. Hits `/probes`
+  to get reachability + latency.
+- **Process accounting** in PSS when readable, RSS otherwise (the payload
+  tells you which).
+- **One sampler shared by N clients** so extra dashboards don't multiply the
+  work — every HTTP/WS read is an atomic load of pre-serialized JSON.
 
 ## HTTP endpoints
 
-| Route | Method | Description |
-|---|---|---|
-| `/` | GET | Built-in dashboard (same `web.html` as the Python build) |
-| `/worker` | POST | Issue a single-use, 5s-expiry WebSocket worker token |
-| `/system` | GET | Latest sampler snapshot — full payload |
-| `/network` | GET | Per-interface counters since boot |
-| `/probes` | GET | Run all configured probes concurrently and report status |
-| `/connect?id=<token>` | GET (Upgrade) | WebSocket frames at `ws_push_interval` |
+### `GET /`
 
-The JSON shape of every response is identical to the Python collector — see the
-upstream README for the field-by-field reference.
+Built-in dashboard at `:4500`. The bundle (HTML, favicon) is baked into the
+binary — no extraction on startup, no static-files directory to manage.
+
+### `POST /worker`
+
+Creates a worker for a WebSocket session. Workers expire after 5 seconds if
+unclaimed.
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | Worker ID — pass to `/connect?id=...` |
+| `url` | string | Pre-built `ws://…/connect?id=…` URL |
+| `message` | string | Status text |
+
+### `GET /system`
+
+Current snapshot of the host. Same payload that the WebSocket pushes.
+
+| Field | Type | Description |
+|---|---|---|
+| `cpu.usage` | number | CPU utilization, % |
+| `cpu.temp` | number | Package temperature, °C (`0` if no sensor) |
+| `cpu.freq` | number | Current frequency, MHz |
+| `mem.total` / `used` / `free` | number | RAM, GiB. `used + free == total` |
+| `mem.percent` | number | RAM utilization, % |
+| `disk.total` / `used` / `free` | number | Primary partition (root or system drive), GiB |
+| `disk.percent` | number | Primary partition utilization, % |
+| `disks[]` | array | Every mounted partition: `device`, `mountpoint`, `fstype`, plus the same usage fields |
+| `disk_io.read_bytes_per_sec` / `write_bytes_per_sec` | number | Aggregate disk throughput, bytes/sec |
+| `disk_io.read_iops` / `write_iops` | number | Aggregate disk operations/sec |
+| `network.rx_bytes_per_sec` | number | Receive throughput (loopback excluded) |
+| `network.tx_bytes_per_sec` | number | Transmit throughput |
+| `processes[]` | array | Top 10 by memory, aggregated by process name |
+| `processes_metric` | string | `"pss"` or `"rss"` — tells the UI which accounting was used |
+| `platform.distro` / `kernel` / `uptime` | string | OS info + human-readable uptime |
+| `user` | string | Logged-in user |
+
+### `GET /network`
+
+| Field | Type | Description |
+|---|---|---|
+| `interfaces[]` | array | Interface names (`eth0`, `wlan0`, …) |
+| `statistics.<iface>` | object | Per-interface counters (see below) |
+
+Per-interface counters under `statistics.<iface>`:
+
+| Field | Type | Description |
+|---|---|---|
+| `mb_sent` / `mb_received` | number | Bytes since boot, divided by 1024² |
+| `pk_sent` / `pk_received` | number | Packet counts |
+| `error_in` / `error_out` | number | Error counts |
+| `dropin` / `dropout` | number | Dropped packet counts |
+
+### `GET /probes`
+
+Probes every URL in the configured allowlist concurrently. Returns
+`{ "probes": [<entry>, ...] }` where each entry is:
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | string | Probe label |
+| `url` | string | Probed URL |
+| `ok` | boolean | `true` if the response was 2xx or 3xx within the timeout |
+| `status_code` | number / null | HTTP status (null on transport failure) |
+| `latency_ms` | number | Round-trip in milliseconds |
+| `error` | string / null | Error message on failure |
+
+The allowlist is re-read from settings on every request — edit
+`~/.vigil-collector/settings.json` and the next call picks it up, no restart
+needed.
+
+## WebSocket
+
+### `GET /connect?id=<worker_id>`
+
+Requires a valid worker ID from `POST /worker`. Once connected, the server
+pushes the `/system` snapshot at the configured interval (1 s by default)
+until either side closes.
 
 ## Configuration
 
 `~/.vigil-collector/settings.json` is created with sensible defaults on first
-run; legacy `~/.psmonitor/` is migrated in place.
+run; all keys are optional.
 
 | Key | Default | Description |
 |---|---|---|
 | `address` | `"localhost"` | HTTP listen address |
 | `port_number` | `4500` | HTTP listen port |
-| `max_ws_connections` | `20` | Cap on concurrent WS clients |
-| `ws_push_interval` | `1.0` | Seconds between WS frames (and sampler tick) |
+| `max_ws_connections` | `20` | Cap on concurrent WebSocket clients |
+| `ws_push_interval` | `1.0` | Seconds between WS frames (also the sampler tick rate) |
 | `probes` | `[ ... ]` | List of `{name, url}` entries probed by `/probes` |
 | `probe_timeout` | `5.0` | Per-probe HTTP timeout, seconds |
-| `logging_enabled` | `true` | Toggle log output |
+| `logging_enabled` | `true` | Toggle file logging |
 | `log_level` | `"INFO"` | `DEBUG` / `INFO` / `WARNING` / `ERROR` |
 
 CLI flags (`--address`, `--port`, `--hub`, `--hub-key`, `--hub-name`,
-`--hub-tags`) and the matching `VIGIL_COLLECTOR_*` environment variables work
-the same as the Python build.
+`--hub-tags`) and the matching `VIGIL_COLLECTOR_*` environment variables
+override the file at startup.
+
+## Connecting from your own app
+
+```js
+// 1. Get a worker id from the HTTP endpoint
+const worker = await fetch("http://localhost:4500/worker", { method: "POST" })
+  .then((r) => r.json());
+
+// 2. Open the websocket using that id
+const ws = new WebSocket(`ws://localhost:4500/connect?id=${worker.id}`);
+ws.onmessage = (event) => {
+  const snapshot = JSON.parse(event.data);
+  // { cpu, mem, disk, disk_io, network, uptime, processes, processes_metric }
+};
+```
+
+Each worker is single-use and expires in 5 seconds if unclaimed. Closing the
+WebSocket frees it.
 
 ## Vigil Pro hub push (optional)
 
@@ -88,13 +171,12 @@ vigil-collector \
 ```
 
 The collector opens an outbound WebSocket to the hub, sends a `hello` frame,
-and pushes `samples`/`processes` frames at the hub-suggested cadence.
-Disconnects are absorbed by exponential backoff (1s → 30s, ×1.7); the local
-HTTP/WS server is unaffected.
-
-The hub wire format is the same v1 protocol the Python collector uses —
-`name|dim`-flattened metrics map, `disk.used_bytes|/var` etc., 25-row top-N
-process frame with PSS/RSS label, snap-loop and Docker mounts skipped.
+and pushes `samples` / `processes` frames at the hub-suggested cadence.
+Disconnects are absorbed by exponential backoff (1 s → 30 s, ×1.7); the local
+HTTP/WS server is unaffected. The wire format is the v1 protocol — flat
+`metric|dim` keys (`disk.used_bytes|/var`, `net.rx_bytes_per_s|eth0`),
+25-row top-N process frame with PSS/RSS label, snap-loop and Docker mounts
+skipped.
 
 ## Architecture
 
@@ -105,28 +187,13 @@ WebSocket handlers project from that snapshot — they never touch sysinfo
 themselves.
 
 Three serialized JSON buffers are cached per tick (HTTP `/system`, WS frame,
-`/network`). At `max_ws_connections = 20`, the WS push path is a single atomic
-load + `socket.send()` per client per tick — no per-client serialization.
+`/network`). At `max_ws_connections = 20`, the WS push path is a single
+atomic load + `socket.send()` per client per tick — no per-client
+serialization.
 
-## Performance vs. the Python collector
+### Runtime layout
 
-Quick measurement on this machine (16-core x86_64, Linux 6.6 WSL2):
-
-| | Rust | Python | Δ |
-|---|---|---|---|
-| Idle CPU (sampler running, no clients) | **0.23%** | 0.87% | ~3.8× |
-| `ab -n 5000 -c 50 -k /system` throughput | **66,948 req/s** | 2,875 req/s | ~23× |
-| Mean latency at concurrency 50 | **0.7 ms** | 7.0 ms | ~10× |
-| Resident memory (warm, sustained) | **8 MB** | 34 MB | ~4× |
-| Virtual memory | **76 MB** | 270 MB | ~3× |
-| OS threads | **2** | 12+ | — |
-| Stripped release binary | **5.5 MB** | (PyInstaller bundle ~30 MB) | ~5× |
-
-The throughput edge comes from caching pre-serialized JSON bytes for each
-endpoint at the sampler tick — every HTTP/WS read is a single atomic load
-plus a `Bytes::send()`, with zero serialization on the hot path.
-
-The memory edge comes from three deliberate choices in the runtime layout:
+The memory and CPU footprints come from three deliberate choices:
 
 - **`#[tokio::main(flavor = "current_thread")]`** — the workload is one 1 Hz
   sampler plus a low double-digit number of cooperative tasks. Default
@@ -192,10 +259,9 @@ window is the contract):
 The per-disk usage walk via `statvfs` runs every tick too, but it's only
 ~30 µs total — cheap enough that the dashboard always sees fresh values.
 
-End result: idle CPU usage drops from being on par with the Python collector
-(~0.87%) to about a quarter of it (0.23%) — and stays there regardless of
-how many clients connect, because the per-tick work doesn't scale with
-client count.
+End result: idle CPU usage settles around ~0.23% of a single core, and stays
+there regardless of how many clients connect, because the per-tick work
+doesn't scale with client count.
 
 ## Single-binary build
 
@@ -203,9 +269,9 @@ client count.
 cargo build --release
 ```
 
-`target/release/vigil-collector` is a self-contained executable — the dashboard
-HTML, favicon, and every runtime dependency are baked in. No `_MEI*` extraction
-on startup (unlike PyInstaller).
+`target/release/vigil-collector` is a self-contained executable — the
+dashboard HTML, favicon, and every runtime dependency are baked in. Stripped
+binary is ~5.5 MB.
 
 For a fully static binary on Linux:
 
@@ -213,21 +279,6 @@ For a fully static binary on Linux:
 rustup target add x86_64-unknown-linux-musl
 cargo build --release --target x86_64-unknown-linux-musl
 ```
-
-## Connecting from your own app
-
-```js
-const worker = await fetch("http://localhost:4500/worker", { method: "POST" })
-  .then((r) => r.json());
-
-const ws = new WebSocket(`ws://localhost:4500/connect?id=${worker.id}`);
-ws.onmessage = (event) => {
-  const snapshot = JSON.parse(event.data);
-  // { cpu, mem, disk, disk_io, network, uptime, processes, processes_metric }
-};
-```
-
-Each worker is single-use and expires in 5 seconds if unclaimed.
 
 ## License
 
