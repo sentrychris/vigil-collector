@@ -127,9 +127,7 @@ pub fn collect(sys: &System, components: &Components, cores: u32) -> Cpu {
     let usage = if sys.cpus().is_empty() {
         0.0
     } else {
-        let avg: f32 = sys.cpus().iter().map(|c| c.cpu_usage()).sum::<f32>()
-            / sys.cpus().len() as f32;
-        round2(avg as f64)
+        round2(sys.global_cpu_usage() as f64)
     };
 
     let freq = sys
