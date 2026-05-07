@@ -122,19 +122,23 @@ fn read_load_avg() -> Option<[f64; 3]> {
 }
 
 pub fn collect(sys: &System, components: &Components, cores: u32) -> Cpu {
-    // sysinfo's per-CPU usage averages to roughly the global percentage,
-    // which is what psutil.cpu_percent() returns at the system level.
     let usage = if sys.cpus().is_empty() {
         0.0
     } else {
         round2(sys.global_cpu_usage() as f64)
     };
 
-    let freq = sys
+    let freqs: Vec<f64> = sys
         .cpus()
-        .first()
-        .map(|c| round2(c.frequency() as f64))
-        .unwrap_or(0.0);
+        .iter()
+        .map(|c| c.frequency() as f64)
+        .filter(|f| *f > 0.0)
+        .collect();
+    let freq = if freqs.is_empty() {
+        0.0
+    } else {
+        round2(freqs.iter().sum::<f64>() / freqs.len() as f64)
+    };
 
     let load = read_load_avg();
 
