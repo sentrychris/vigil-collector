@@ -45,11 +45,13 @@ async fn main() -> anyhow::Result<()> {
     } else {
         args.address.clone()
     };
+
     let port = if args.port == 0 {
         settings.port_number
     } else {
         args.port
     };
+
     let addr = resolve_addr(&address, port)?;
 
     let mut sampler = Sampler::new(settings.ws_push_interval);

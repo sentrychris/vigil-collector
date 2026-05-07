@@ -210,6 +210,7 @@ impl Sampler {
         if self.handle.is_some() {
             return;
         }
+
         let interval = self.interval;
         let snap_slot = self.snapshot.clone();
         let json = self.json.clone();

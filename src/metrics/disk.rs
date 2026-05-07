@@ -192,7 +192,8 @@ fn whole_disks() -> std::collections::HashSet<String> {
     let Ok(rd) = std::fs::read_dir("/sys/block") else {
         return set;
     };
-    for entry in rd.flatten() {
+
+    for entry in rd.flatten() { // skip failed entries, e.g. permission-denied vfs
         let name = entry.file_name().to_string_lossy().into_owned();
         if name.starts_with("loop") || name.starts_with("ram") {
             continue;
