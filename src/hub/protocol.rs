@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 pub const PROTOCOL_VERSION: u32 = 1;
-pub const AGENT_VERSION: &str = "1.0.0";
+pub const AGENT_VERSION: &str = "0.1.1";
 
 #[derive(Serialize)]
 pub struct HostInfo<'a> {

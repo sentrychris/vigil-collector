@@ -1,7 +1,7 @@
 use std::collections::{BTreeSet, HashMap};
 use std::sync::OnceLock;
 
-use sysinfo::{System, Users};
+use sysinfo::{Pid, System, Users};
 
 use crate::snapshot::Process;
 
@@ -95,8 +95,29 @@ pub fn process_metric_label(sys: &System) -> &'static str {
     }
 }
 
+/// PSS sum for a process group in MB, falling back per-pid to the
+/// process's RSS (from sysinfo's already-cached value) when smaps_rollup
+/// is denied or the process exited mid-tick.
+fn group_pss_mb(sys: &System, agg: &Aggregated) -> f64 {
+    let mut sum_bytes: u64 = 0;
+    for &pid in &agg.pids {
+        let bytes = match read_pss_kb(pid) {
+            Some(kb) => kb.saturating_mul(1024),
+            None => sys
+                .process(Pid::from_u32(pid))
+                .map(|p| p.memory())
+                .unwrap_or(0),
+        };
+        sum_bytes = sum_bytes.saturating_add(bytes);
+    }
+    sum_bytes as f64 / (1024.0 * 1024.0)
+}
+
 pub fn collect_top(sys: &System, users: &Users) -> Vec<Process> {
-    let use_pss = pss_supported(sys);
+    // First pass: aggregate by name using RSS only. PSS would require a
+    // /proc/<pid>/smaps_rollup syscall per process — hundreds per slow tick
+    // on a busy host. PSS ≤ RSS, which lets the second pass skip most of
+    // them via the streaming bound below.
     let mut by_name: HashMap<String, Aggregated> = HashMap::new();
 
     for (pid, proc_) in sys.processes() {
@@ -111,16 +132,7 @@ pub fn collect_top(sys: &System, users: &Users) -> Vec<Process> {
 
         let pid_u: u32 = pid.as_u32();
         let name = display_name(proc_);
-
-        let mem_bytes = if use_pss {
-            match read_pss_kb(pid_u) {
-                Some(kb) => kb.saturating_mul(1024),
-                None => proc_.memory(),
-            }
-        } else {
-            proc_.memory()
-        };
-        let mem_mb = mem_bytes as f64 / (1024.0 * 1024.0);
+        let mem_mb = proc_.memory() as f64 / (1024.0 * 1024.0);
 
         let username = proc_
             .user_id()
@@ -136,7 +148,46 @@ pub fn collect_top(sys: &System, users: &Users) -> Vec<Process> {
         }
     }
 
-    let mut combined: Vec<Process> = by_name
+    let mut entries: Vec<(String, Aggregated)> = by_name.into_iter().collect();
+    entries.sort_by(|a, b| {
+        b.1.mem_mb
+            .partial_cmp(&a.1.mem_mb)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    const TOP_N: usize = 10;
+
+    let final_entries: Vec<(String, Aggregated)> = if pss_supported(sys) {
+        // Streaming top-N by PSS. Walk RSS-descending, keeping the top-N
+        // by PSS seen so far (sorted desc). Stop once the next candidate's
+        // RSS no longer exceeds the smallest PSS in the running top-N —
+        // RSS is monotone descending and PSS ≤ RSS, so no later entry can
+        // break in either. Exact result; typically ~10-20 PSS reads on a
+        // normal system, degrading to reading all entries only under
+        // pathological shared-page compression.
+        let mut top: Vec<(String, Aggregated)> = Vec::with_capacity(TOP_N + 1);
+        for (name, mut agg) in entries.into_iter() {
+            if top.len() == TOP_N && agg.mem_mb <= top[TOP_N - 1].1.mem_mb {
+                break;
+            }
+            agg.mem_mb = group_pss_mb(sys, &agg);
+            top.push((name, agg));
+            top.sort_by(|a, b| {
+                b.1.mem_mb
+                    .partial_cmp(&a.1.mem_mb)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            if top.len() > TOP_N {
+                top.pop();
+            }
+        }
+        top
+    } else {
+        entries.truncate(TOP_N);
+        entries
+    };
+
+    final_entries
         .into_iter()
         .map(|(name, agg)| Process {
             pid: agg.pids.first().copied().unwrap_or(0),
@@ -148,11 +199,7 @@ pub fn collect_top(sys: &System, users: &Users) -> Vec<Process> {
                 .join(", "),
             mem: round2(agg.mem_mb),
         })
-        .collect();
-
-    combined.sort_by(|a, b| b.mem.partial_cmp(&a.mem).unwrap_or(std::cmp::Ordering::Equal));
-    combined.truncate(10);
-    combined
+        .collect()
 }
 
 /// Resolve a process display name. Matches psutil: returns the kernel
