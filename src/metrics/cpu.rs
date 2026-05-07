@@ -108,8 +108,15 @@ fn read_via_thermal_zones() -> Option<f64> {
 #[cfg(unix)]
 fn read_load_avg() -> Option<[f64; 3]> {
     let mut buf = [0.0_f64; 3];
-    let n = unsafe { libc::getloadavg(buf.as_mut_ptr(), 3) };
-    if n == 3 {
+    let want = buf.len() as libc::c_int;
+
+    // SAFETY: buf is a valid mutable pointer with 3 f64 slots.
+    // libc::getloadavg writes at most 3 f64s.
+    let n = unsafe {
+        libc::getloadavg(buf.as_mut_ptr(), want)
+    };
+
+    if n == want {
         Some(buf)
     } else {
         None
