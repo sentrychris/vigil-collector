@@ -3,6 +3,8 @@
 A lightweight system and network monitoring server. Stream live host metrics to
 any client over HTTP or WebSocket.
 
+<img width="1920" height="1016" alt="image" src="https://github.com/user-attachments/assets/4634aa3a-21ee-4629-a76e-feb669e48e38" />
+
 See it powering a real dashboard [here](https://status.edcs.app), paired with
 [Vigil UI](https://github.com/sentrychris/vigil), the comprehensive frontend.
 
