@@ -3,7 +3,7 @@
 A lightweight system and network monitoring server. Stream live host metrics to
 any client over HTTP or WebSocket.
 
-See it powering a real dashboard [here](https://status.edcs.app) — paired with
+See it powering a real dashboard [here](https://status.edcs.app), paired with
 [Vigil UI](https://github.com/sentrychris/vigil), the comprehensive frontend.
 
 ## Quick start
@@ -23,13 +23,13 @@ it's running.
 ```
 
 `Ctrl-C` (or `SIGTERM`) shuts everything down cleanly. A settings file is
-created on first run at `~/.vigil-collector/settings.json` — see
+created on first run at `~/.vigil-collector/settings.json` - see
 [Configuration](#configuration).
 
 ## What you get
 
 - **Live stream** of CPU, memory, disk, disk I/O, network throughput, and top
-  processes — one snapshot per second by default.
+  processes - one snapshot per second by default.
 - **Multi-disk** for every mounted partition, with reserved-block accounting
   that matches `df` exactly.
 - **External health checks** using a configurable list of URLs. Hits `/probes`
@@ -37,14 +37,14 @@ created on first run at `~/.vigil-collector/settings.json` — see
 - **Process accounting** in PSS when readable, RSS otherwise (the payload
   tells you which).
 - **One sampler shared by N clients** so extra dashboards don't multiply the
-  work — every HTTP/WS read is an atomic load of pre-serialized JSON.
+  work - every HTTP/WS read is an atomic load of pre-serialized JSON.
 
 ## HTTP endpoints
 
 ### `GET /`
 
 Built-in dashboard at `:4500`. The bundle (HTML, favicon) is baked into the
-binary — no extraction on startup, no static-files directory to manage.
+binary - no extraction on startup, no static-files directory to manage.
 
 ### `POST /worker`
 
@@ -53,7 +53,7 @@ unclaimed.
 
 | Field | Type | Description |
 |---|---|---|
-| `id` | string | Worker ID — pass to `/connect?id=...` |
+| `id` | string | Worker ID - pass to `/connect?id=...` |
 | `url` | string | Pre-built `ws://…/connect?id=…` URL |
 | `message` | string | Status text |
 
@@ -76,7 +76,7 @@ Current snapshot of the host. Same payload that the WebSocket pushes.
 | `network.rx_bytes_per_sec` | number | Receive throughput (loopback excluded) |
 | `network.tx_bytes_per_sec` | number | Transmit throughput |
 | `processes[]` | array | Top 10 by memory, aggregated by process name |
-| `processes_metric` | string | `"pss"` or `"rss"` — tells the UI which accounting was used |
+| `processes_metric` | string | `"pss"` or `"rss"` - tells the UI which accounting was used |
 | `platform.distro` / `kernel` / `uptime` | string | OS info + human-readable uptime |
 | `user` | string | Logged-in user |
 
@@ -110,7 +110,7 @@ Probes every URL in the configured allowlist concurrently. Returns
 | `latency_ms` | number | Round-trip in milliseconds |
 | `error` | string / null | Error message on failure |
 
-The allowlist is re-read from settings on every request — edit
+The allowlist is re-read from settings on every request - edit
 `~/.vigil-collector/settings.json` and the next call picks it up, no restart
 needed.
 
@@ -173,7 +173,7 @@ vigil-collector \
 The collector opens an outbound WebSocket to the hub, sends a `hello` frame,
 and pushes `samples` / `processes` frames at the hub-suggested cadence.
 Disconnects are absorbed by exponential backoff (1 s → 30 s, ×1.7); the local
-HTTP/WS server is unaffected. The wire format is the v1 protocol — flat
+HTTP/WS server is unaffected. The wire format is the v1 protocol - flat
 `metric|dim` keys (`disk.used_bytes|/var`, `net.rx_bytes_per_s|eth0`),
 25-row top-N process frame with PSS/RSS label, snap-loop and Docker mounts
 skipped.
@@ -183,29 +183,29 @@ skipped.
 A single tokio task ticks every `ws_push_interval` seconds, runs the metric
 collection on the blocking pool (so sysinfo's `/proc` reads don't tie up a
 runtime worker), and publishes the snapshot via `arc_swap::ArcSwap`. HTTP and
-WebSocket handlers project from that snapshot — they never touch sysinfo
+WebSocket handlers project from that snapshot - they never touch sysinfo
 themselves.
 
 Three serialized JSON buffers are cached per tick (HTTP `/system`, WS frame,
 `/network`). At `max_ws_connections = 20`, the WS push path is a single
-atomic load + `socket.send()` per client per tick — no per-client
+atomic load + `socket.send()` per client per tick, no per-client
 serialization.
 
 ### Runtime layout
 
 The memory and CPU footprints come from three deliberate choices:
 
-- **`#[tokio::main(flavor = "current_thread")]`** — the workload is one 1 Hz
+- **`#[tokio::main(flavor = "current_thread")]`** - the workload is one 1 Hz
   sampler plus a low double-digit number of cooperative tasks. Default
   multi-threaded tokio would spawn one worker thread per CPU core (each with
   a 2 MB virtual stack), which on a 16-core box accounts for ~30 MB of idle
   virtual memory we'd never touch.
 - **`sysinfo` with `default-features = false`** (drops the `multithread`
-  feature) — sysinfo's default build pulls in rayon and parallelizes process
+  feature) - sysinfo's default build pulls in rayon and parallelizes process
   scanning across a global thread pool sized to `num_cpus`. For a 1 Hz tick
   scanning a few hundred processes that's wasted: rayon's idle pool was the
   source of ~16 background threads in early builds.
-- **Cached `Arc<Vec<u8>>` per endpoint** — one allocation per sampler tick
+- **Cached `Arc<Vec<u8>>` per endpoint** - one allocation per sampler tick
   for each of `/system`, the WS frame, and `/network`. Old buffers are freed
   as readers release their `Arc` clones, so steady-state heap is bounded by
   one tick's worth of buffers regardless of concurrent client count.
@@ -242,9 +242,9 @@ Three rate-limit decisions cut that to ~3,000 µs/tick on average:
   5-tick cycle. Frequency is a display value with no delta semantics, so
   freshness is irrelevant here.
 - **Mount table re-scanned once a minute** (`DISK_LIST_REFRESH_EVERY = 60`)
-  instead of every tick. We never read sysinfo's stored disk usage anyway —
+  instead of every tick. We never read sysinfo's stored disk usage anyway -
   `usage_for_mount` calls `statvfs` itself for the byte-compatible
-  `(f_blocks - f_bfree)` accounting — so sysinfo's per-tick `Disks::refresh`
+  `(f_blocks - f_bfree)` accounting - so sysinfo's per-tick `Disks::refresh`
   is purely waste and gets skipped. `Disks::refresh_list` catches
   mount/unmount events.
 
@@ -257,7 +257,7 @@ window is the contract):
 - Network rx/tx bytes/sec (from sysinfo's per-iface counter deltas)
 
 The per-disk usage walk via `statvfs` runs every tick too, but it's only
-~30 µs total — cheap enough that the dashboard always sees fresh values.
+~30 µs total - cheap enough that the dashboard always sees fresh values.
 
 End result: idle CPU usage settles around ~0.23% of a single core, and stays
 there regardless of how many clients connect, because the per-tick work
@@ -269,7 +269,7 @@ doesn't scale with client count.
 cargo build --release
 ```
 
-`target/release/vigil-collector` is a self-contained executable — the
+`target/release/vigil-collector` is a self-contained executable - the
 dashboard HTML, favicon, and every runtime dependency are baked in. Stripped
 binary is ~5.5 MB.
 
