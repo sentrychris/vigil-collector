@@ -125,30 +125,21 @@ pool so the runtime thread stays unblocked.
 These are the load-bearing properties of the system. Breaking any of them is
 a regression even if tests still pass.
 
-1. **Wire format is byte-compatible with the original Python collector.** The
-   metric files reference `psutil` repeatedly because the dashboard, hub
-   protocol, and any external consumers were built against that exact JSON
-   shape. Examples: `Cpu::temp` serializes as integer `0` when no sensor is
-   present (not `0.0`); disk percentages use `df`'s denominator
-   (`used / (used + free)`); `mem.used + mem.free == mem.total` because we
-   derive from `available_memory`. See
-   [serialize_temp](../src/snapshot.rs#L37-L43) and
-   [statvfs_usage](../src/metrics/disk.rs#L29-L54).
 
-2. **The sampler must never die.** Loss of the tick task means stale buffers
+1. **The sampler must never die.** Loss of the tick task means stale buffers
    forever and no log signal. Errors during refresh rebuild state from
    scratch and continue ([sampler.rs:248-256](../src/sampler.rs#L248-L256)).
 
-3. **Read paths never call sysinfo.** All per-metric work happens inside the
+2. **Read paths never call sysinfo.** All per-metric work happens inside the
    sampler's `spawn_blocking` closure. HTTP/WS handlers only do `load_full`
    on `ArcSwap`. If you find yourself adding a metric read in a handler,
    stop and add it to the sampler instead.
 
-4. **Per-tick allocation is bounded.** Three `Vec<u8>` allocations per tick
+3. **Per-tick allocation is bounded.** Three `Vec<u8>` allocations per tick
    regardless of client count. Old buffers free as readers drop their `Arc`
    clones. Steady-state heap does not scale with concurrent clients.
 
-5. **CLI flags override settings on startup, not at runtime.** `address` and
+4. **CLI flags override settings on startup, not at runtime.** `address` and
    `port` come from CLI if provided, else from `~/.vigil-collector/settings.json`
    ([main.rs:43-55](../src/main.rs#L43-L55)). The probe list is the
    exception — re-read on every `/probes` request so operators can edit
@@ -156,9 +147,7 @@ a regression even if tests still pass.
 
 ## Configuration
 
-Settings live in `~/.vigil-collector/settings.json` (created with defaults on
-first run; `~/.psmonitor/` is migrated forward if present —
-[migrate_legacy](../src/config.rs#L106-L125)). All keys are optional and
+Settings live in `~/.vigil-collector/settings.json`. All keys are optional and
 parse failures fall back to defaults rather than refusing to start
 ([read_settings](../src/config.rs#L130-L166)).
 

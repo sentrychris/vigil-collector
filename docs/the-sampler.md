@@ -165,7 +165,7 @@ and returns a fresh value.
 
 Uses `sys.available_memory()` as the basis for `free`/`used`, so
 `used + free == total`. The raw `used` and `free` fields would exclude
-reclaimable cache and break that identity — psutil's behavior is what we
+reclaimable cache and break that identity, psutil's behavior is what we
 match.
 
 ### Disk ([metrics/disk.rs](../src/metrics/disk.rs))
@@ -182,13 +182,6 @@ Three independent collectors:
   `/sys/block`) to avoid double-counting bytes attributed to both a disk
   and its partitions. Sectors are 512-byte regardless of physical sector
   size — see kernel docs.
-
-The usage math
-([`statvfs_usage`](../src/metrics/disk.rs#L29-L54)) is the
-psutil-compatibility hot spot: `used = (f_blocks - f_bfree) * f_frsize`
-counts reserved-for-root blocks as USED, and `percent = used / (used + free)`
-matches `df`'s denominator. Don't change this without coordinating with the
-dashboard.
 
 ### Network ([metrics/net.rs](../src/metrics/net.rs))
 
