@@ -72,3 +72,19 @@ pub struct Processes<'a> {
     pub metric: &'a str,
     pub items: Vec<ProcessItem<'a>>,
 }
+
+#[derive(Serialize)]
+pub struct ProcessCpuItem<'a> {
+    pub pid: u32,
+    pub name: &'a str,
+    pub username: &'a str,
+    pub cpu_pct: f64,
+}
+
+#[derive(Serialize)]
+pub struct ProcessesCpu<'a> {
+    pub v: u32,
+    pub t: &'static str,
+    pub ts: i64,
+    pub items: Vec<ProcessCpuItem<'a>>,
+}

@@ -11,7 +11,8 @@ use crate::snapshot::Snapshot;
 
 use super::flatten::{flatten, PROCESSES_MAX};
 use super::protocol::{
-    Hello, HostInfo, HubFrame, ProcessItem, Processes, Samples, AGENT_VERSION, PROTOCOL_VERSION,
+    Hello, HostInfo, HubFrame, ProcessCpuItem, ProcessItem, Processes, ProcessesCpu, Samples,
+    AGENT_VERSION, PROTOCOL_VERSION,
 };
 
 const BACKOFF_INITIAL: Duration = Duration::from_secs(1);
@@ -231,6 +232,28 @@ where
                 t: "processes",
                 ts,
                 metric: &snap.processes_metric,
+                items,
+            };
+            tx.send(Message::Text(serde_json::to_string(&frame)?.into()))
+                .await?;
+        }
+
+        if !snap.processes_by_cpu.is_empty() {
+            let items: Vec<ProcessCpuItem> = snap
+                .processes_by_cpu
+                .iter()
+                .take(PROCESSES_MAX)
+                .map(|p| ProcessCpuItem {
+                    pid: p.pid,
+                    name: clip(&p.name, 256),
+                    username: clip(&p.username, 256),
+                    cpu_pct: p.cpu,
+                })
+                .collect();
+            let frame = ProcessesCpu {
+                v: PROTOCOL_VERSION,
+                t: "processes_cpu",
+                ts,
                 items,
             };
             tx.send(Message::Text(serde_json::to_string(&frame)?.into()))

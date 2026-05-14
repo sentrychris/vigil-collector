@@ -997,6 +997,38 @@
                         </table>
                     </div>
                 </div>
+
+                <div class="panel" style="margin-top: 1rem;">
+                    <div class="section-header">
+                        <div class="sh-left">
+                            <div class="tile tile-md tone-purple"><i class="bi bi-cpu"></i></div>
+                            <div>
+                                <div class="sh-title">Top Processes by CPU</div>
+                                <div class="sh-sub">RANKED · LIVE</div>
+                            </div>
+                        </div>
+                        <div style="display: inline-flex; align-items: center; gap: 0.6rem;">
+                            <span class="chip purple">CPU %</span>
+                            <span class="text-dim" style="font-size: 0.7rem; font-family: 'IBM Plex Mono', monospace;">Averaged across the last sampler window (~5s)</span>
+                        </div>
+                    </div>
+                    <div>
+                        <table class="v-table">
+                            <thead>
+                                <tr>
+                                    <th class="ps-4" style="width: 4rem;">#</th>
+                                    <th>Process</th>
+                                    <th>User</th>
+                                    <th class="text-end">PID</th>
+                                    <th class="text-end pe-4">CPU (%)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="processes-cpu-tbody">
+                                <tr><td colspan="5" class="empty">No data — fetch <code>/system</code> or stream WebSocket.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             </section>
 
             <!-- PROBES -->
@@ -1207,6 +1239,7 @@
                 }
                 if (Array.isArray(data.disks)) renderDisks(data.disks);
                 if (Array.isArray(data.processes)) renderProcesses(data.processes, data.processes_metric);
+                if (Array.isArray(data.processes_by_cpu)) renderProcessesCpu(data.processes_by_cpu);
             };
 
             const renderDisks = (disks) => {
@@ -1259,6 +1292,31 @@
                             <div style="display:flex;align-items:center;gap:.5rem;justify-content:flex-end;">
                                 <div class="mini-bar"><span style="width:${w}%"></span></div>
                                 <span class="mono" style="min-width:3.5rem;text-align:right;">${mem.toFixed(2)}</span>
+                            </div>
+                        </td>
+                    </tr>`;
+                }).join("");
+            };
+
+            const renderProcessesCpu = (procs) => {
+                const tbody = $("#processes-cpu-tbody");
+                if (!procs.length) {
+                    tbody.innerHTML = `<tr><td colspan="5" class="empty">No processes.</td></tr>`;
+                    return;
+                }
+                const max = Math.max(...procs.map((p) => Number(p.cpu) || 0), 1);
+                tbody.innerHTML = procs.map((p, i) => {
+                    const cpu = Number(p.cpu) || 0;
+                    const w = Math.round((cpu / max) * 100);
+                    return `<tr>
+                        <td class="ps-4 text-dim mono">${i + 1}</td>
+                        <td class="mono" style="color:var(--text);">${escapeHTML(p.name || "—")}</td>
+                        <td class="text-mute" style="font-size:.78rem;">${escapeHTML(p.username || "—")}</td>
+                        <td class="text-end text-dim mono">${escapeHTML(String(p.pid ?? "—"))}</td>
+                        <td class="text-end pe-4">
+                            <div style="display:flex;align-items:center;gap:.5rem;justify-content:flex-end;">
+                                <div class="mini-bar"><span style="width:${w}%"></span></div>
+                                <span class="mono" style="min-width:3.5rem;text-align:right;">${cpu.toFixed(2)}</span>
                             </div>
                         </td>
                     </tr>`;

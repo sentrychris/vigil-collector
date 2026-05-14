@@ -3,7 +3,7 @@ use std::sync::OnceLock;
 
 use sysinfo::{Pid, System, Users};
 
-use crate::snapshot::Process;
+use crate::snapshot::{Process, ProcessCpu};
 
 use super::round2;
 
@@ -11,6 +11,13 @@ use super::round2;
 struct Aggregated {
     mem_mb: f64,
     pids: Vec<u32>,
+    usernames: BTreeSet<String>,
+}
+
+#[derive(Default)]
+struct AggregatedCpu {
+    cpu_pct: f64,
+    pid: u32,
     usernames: BTreeSet<String>,
 }
 
@@ -218,10 +225,75 @@ fn display_name(proc_: &sysinfo::Process) -> String {
 }
 
 pub fn refresh_kind() -> sysinfo::ProcessRefreshKind {
-    // Only the bits we surface: memory and user. Skipping CPU%, exe,
+    // Only the bits we surface: memory, CPU, and user. Skipping exe,
     // cmdline, etc. saves the per-process overhead sysinfo would
-    // otherwise pay.
+    // otherwise pay. CPU% needs two refreshes spaced in time to produce a
+    // non-zero value; the sampler's 5-tick cadence provides that window.
     sysinfo::ProcessRefreshKind::new()
         .with_memory()
+        .with_cpu()
         .with_user(sysinfo::UpdateKind::OnlyIfNotSet)
+}
+
+/// Top-N processes by CPU%, aggregated by display name. Mirrors the
+/// shape of ``collect_top`` but sorts on summed CPU instead of memory.
+/// sysinfo's per-process CPU% is computed from utime/stime deltas
+/// between consecutive refreshes — with the sampler scanning every 5
+/// ticks (~5s), values reflect that window, not instantaneous load. The
+/// streaming bound used for PSS doesn't apply here: CPU% has no cheap
+/// upper bound, so we sort the full set and truncate.
+pub fn collect_top_cpu(sys: &System, users: &Users) -> Vec<ProcessCpu> {
+    let mut by_name: HashMap<String, AggregatedCpu> = HashMap::new();
+
+    for (pid, proc_) in sys.processes() {
+        if proc_.thread_kind().is_some() {
+            continue;
+        }
+
+        let pid_u: u32 = pid.as_u32();
+        let name = display_name(proc_);
+        let cpu_pct = proc_.cpu_usage() as f64;
+
+        let username = proc_
+            .user_id()
+            .and_then(|uid| users.get_user_by_id(uid))
+            .map(|u| u.name().to_string())
+            .unwrap_or_default();
+
+        let entry = by_name.entry(name).or_default();
+        entry.cpu_pct += cpu_pct;
+        // Keep a single representative pid per name group — pick the
+        // highest-CPU one so clicking through to "details" lands on the
+        // process actually driving the load.
+        if entry.pid == 0 || cpu_pct > 0.0 {
+            entry.pid = pid_u;
+        }
+        if !username.is_empty() {
+            entry.usernames.insert(username);
+        }
+    }
+
+    let mut entries: Vec<(String, AggregatedCpu)> = by_name.into_iter().collect();
+    entries.sort_by(|a, b| {
+        b.1.cpu_pct
+            .partial_cmp(&a.1.cpu_pct)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    const TOP_N: usize = 10;
+    entries.truncate(TOP_N);
+
+    entries
+        .into_iter()
+        .map(|(name, agg)| ProcessCpu {
+            pid: agg.pid,
+            name,
+            username: agg
+                .usernames
+                .into_iter()
+                .collect::<Vec<_>>()
+                .join(", "),
+            cpu: round2(agg.cpu_pct),
+        })
+        .collect()
 }

@@ -15,6 +15,7 @@ pub struct Snapshot {
     pub uptime: String,
     pub processes: Vec<Process>,
     pub processes_metric: String,
+    pub processes_by_cpu: Vec<ProcessCpu>,
     pub interfaces: Vec<String>,
     pub network_stats: BTreeMap<String, NetIfaceStats>,
 }
@@ -99,6 +100,14 @@ pub struct Process {
 }
 
 #[derive(Serialize, Clone, Debug)]
+pub struct ProcessCpu {
+    pub pid: u32,
+    pub name: String,
+    pub username: String,
+    pub cpu: f64,
+}
+
+#[derive(Serialize, Clone, Debug)]
 pub struct NetIfaceStats {
     pub mb_sent: f64,
     pub mb_received: f64,
@@ -123,6 +132,7 @@ pub struct HttpSystemView<'a> {
     pub platform: &'a PlatformInfo,
     pub processes: &'a [Process],
     pub processes_metric: &'a str,
+    pub processes_by_cpu: &'a [ProcessCpu],
 }
 
 /// WebSocket frame projection. Mirrors ``server/websocket/system.py`` —
@@ -137,6 +147,7 @@ pub struct WsSystemView<'a> {
     pub uptime: &'a str,
     pub processes: &'a [Process],
     pub processes_metric: &'a str,
+    pub processes_by_cpu: &'a [ProcessCpu],
 }
 
 /// HTTP `/network` projection. Mirrors ``server/http/network.py``.
@@ -159,6 +170,7 @@ impl Snapshot {
             platform: &self.platform,
             processes: &self.processes,
             processes_metric: &self.processes_metric,
+            processes_by_cpu: &self.processes_by_cpu,
         }
     }
 
@@ -172,6 +184,7 @@ impl Snapshot {
             uptime: &self.uptime,
             processes: &self.processes,
             processes_metric: &self.processes_metric,
+            processes_by_cpu: &self.processes_by_cpu,
         }
     }
 

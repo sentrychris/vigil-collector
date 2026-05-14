@@ -11,7 +11,7 @@ use tokio::task::JoinHandle;
 use crate::metrics;
 use crate::metrics::disk::DiskIoPrev;
 use crate::metrics::net::NetIoPrev;
-use crate::snapshot::{Process, Snapshot};
+use crate::snapshot::{Process, ProcessCpu, Snapshot};
 
 // Slow-tick cadences for the heavy refresh phases. Profiling on a typical
 // host shows ``processes_refresh`` is ~63% of a tick (~7 ms walking
@@ -38,6 +38,7 @@ struct SamplerState {
     tick: u64,
     cached_processes: Vec<Process>,
     cached_processes_metric: String,
+    cached_processes_by_cpu: Vec<ProcessCpu>,
 }
 
 impl SamplerState {
@@ -65,6 +66,7 @@ impl SamplerState {
             tick: 0,
             cached_processes: Vec::new(),
             cached_processes_metric: String::from("rss"),
+            cached_processes_by_cpu: Vec::new(),
         }
     }
 
@@ -101,6 +103,8 @@ impl SamplerState {
             self.cached_processes = metrics::process::collect_top(&self.sys, &self.users);
             self.cached_processes_metric =
                 metrics::process::process_metric_label(&self.sys).to_string();
+            self.cached_processes_by_cpu =
+                metrics::process::collect_top_cpu(&self.sys, &self.users);
         }
 
         // Slow, every-Mth-tick: re-scan the mount table to catch new
@@ -137,6 +141,7 @@ impl SamplerState {
             platform: plat,
             processes: self.cached_processes.clone(),
             processes_metric: self.cached_processes_metric.clone(),
+            processes_by_cpu: self.cached_processes_by_cpu.clone(),
             interfaces,
             network_stats,
         }
