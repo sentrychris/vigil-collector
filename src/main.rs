@@ -84,7 +84,7 @@ async fn main() -> anyhow::Result<()> {
     #[cfg(windows)]
     let tray = if tray_mode {
         match tray::Tray::start(
-            format!("Vigil Collector\nhttp://{addr}"),
+            format!("http://{}", browsable(addr)),
             tray_tx,
             active_ws.clone(),
         ) {
@@ -147,6 +147,21 @@ async fn main() -> anyhow::Result<()> {
     let _ = restart;
 
     serve_result
+}
+
+/// The address to point a browser at: a wildcard listen address (all
+/// interfaces) becomes loopback, which always reaches it.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn browsable(addr: SocketAddr) -> SocketAddr {
+    match addr.ip() {
+        IpAddr::V4(ip) if ip.is_unspecified() => {
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), addr.port())
+        }
+        IpAddr::V6(ip) if ip.is_unspecified() => {
+            SocketAddr::new(IpAddr::V6(std::net::Ipv6Addr::LOCALHOST), addr.port())
+        }
+        _ => addr,
+    }
 }
 
 /// What the Windows tray menu asks for. Defined for every platform so the
@@ -215,7 +230,7 @@ async fn wait_for_signal() {
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_addr;
+    use super::{browsable, resolve_addr};
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
     #[test]
@@ -233,5 +248,13 @@ mod tests {
             resolve_addr("::1", 1).unwrap().ip(),
             IpAddr::V6(Ipv6Addr::LOCALHOST)
         );
+    }
+
+    #[test]
+    fn browsable_turns_wildcards_into_loopback() {
+        let url = |addr: &str| format!("http://{}", browsable(addr.parse().unwrap()));
+        assert_eq!(url("0.0.0.0:4500"), "http://127.0.0.1:4500");
+        assert_eq!(url("[::]:4500"), "http://[::1]:4500");
+        assert_eq!(url("192.168.1.5:4500"), "http://192.168.1.5:4500");
     }
 }

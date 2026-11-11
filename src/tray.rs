@@ -13,7 +13,8 @@
 //!    if the copy fails to start.
 //! 2. The copy is the *tray process*. It runs the collector as usual and
 //!    owns the icon. Its log still goes to the log file. The menu also
-//!    shows how many dashboards are connected and the version.
+//!    shows how many dashboards are connected and the version, and
+//!    double-clicking the icon opens the dashboard in the browser.
 //!
 //! ``--foreground`` skips all of this and runs in the console as before,
 //! with Ctrl-C to stop. So do services and ``SYSTEM`` scheduled tasks
@@ -38,6 +39,7 @@ use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::{
     BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CreateDIBSection, DIB_RGB_COLORS, DeleteObject, HBITMAP,
 };
+use windows_sys::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
 use windows_sys::Win32::System::Console::{
     GetConsoleMode, GetConsoleProcessList, GetConsoleWindow, GetStdHandle, STD_OUTPUT_HANDLE,
 };
@@ -50,16 +52,17 @@ use windows_sys::Win32::UI::HiDpi::{
 };
 use windows_sys::Win32::UI::Shell::{
     NIF_ICON, NIF_MESSAGE, NIF_SHOWTIP, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_SETVERSION,
-    NOTIFYICON_VERSION_4, NOTIFYICONDATAW, Shell_NotifyIconW,
+    NOTIFYICON_VERSION_4, NOTIFYICONDATAW, Shell_NotifyIconW, ShellExecuteW,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreateIconFromResourceEx, CreatePopupMenu, CreateWindowExW, DefWindowProcW,
     DestroyIcon, DestroyMenu, DestroyWindow, DispatchMessageW, GetCursorPos, GetMessageW,
     GetSystemMetrics, LR_DEFAULTCOLOR, MB_ICONERROR, MB_OK, MENUITEMINFOW, MF_GRAYED, MF_SEPARATOR,
     MF_STRING, MIIM_BITMAP, MSG, MessageBoxW, PostMessageW, PostQuitMessage, RegisterClassW,
-    RegisterWindowMessageW, SM_CXSMICON, SW_HIDE, SetForegroundWindow, SetMenuItemInfoW,
-    ShowWindow, TPM_RIGHTBUTTON, TrackPopupMenu, TranslateMessage, WM_APP, WM_CLOSE, WM_COMMAND,
-    WM_CONTEXTMENU, WM_DESTROY, WM_ENDSESSION, WM_NULL, WM_RBUTTONUP, WNDCLASSW,
+    RegisterWindowMessageW, SM_CXSMICON, SW_HIDE, SW_SHOWNORMAL, SetForegroundWindow,
+    SetMenuItemInfoW, ShowWindow, TPM_RIGHTBUTTON, TrackPopupMenu, TranslateMessage, WM_APP,
+    WM_CLOSE, WM_COMMAND, WM_CONTEXTMENU, WM_DESTROY, WM_ENDSESSION, WM_LBUTTONDBLCLK, WM_NULL,
+    WM_RBUTTONUP, WNDCLASSW,
 };
 
 /// Set on the tray process so it knows it is the copy, not the launcher.
@@ -287,17 +290,18 @@ pub struct Tray {
 }
 
 impl Tray {
-    /// ``connections`` is the server's count of open WebSocket sessions,
-    /// read each time the menu opens.
+    /// ``url`` is the dashboard's address, shown in the tooltip and opened
+    /// by a double-click. ``connections`` is the server's count of open
+    /// WebSocket sessions, read each time the menu opens.
     pub fn start(
-        tooltip: String,
+        url: String,
         events: UnboundedSender<TrayEvent>,
         connections: Arc<AtomicUsize>,
     ) -> anyhow::Result<Self> {
         let (ready_tx, ready_rx) = std_mpsc::channel();
         let thread = std::thread::Builder::new()
             .name("tray".into())
-            .spawn(move || run(tooltip, events, connections, ready_tx))?;
+            .spawn(move || run(url, events, connections, ready_tx))?;
         match ready_rx.recv() {
             Ok(Ok(hwnd)) => Ok(Self {
                 hwnd,
@@ -328,6 +332,7 @@ struct State {
     events: UnboundedSender<TrayEvent>,
     taskbar_created: u32,
     connections: Arc<AtomicUsize>,
+    url: Vec<u16>,
 }
 
 thread_local! {
@@ -354,7 +359,7 @@ fn add_icon() {
 }
 
 fn run(
-    tooltip: String,
+    url: String,
     events: UnboundedSender<TrayEvent>,
     connections: Arc<AtomicUsize>,
     ready: std_mpsc::Sender<Result<usize, String>>,
@@ -366,6 +371,9 @@ fn run(
         // created at the size the taskbar really draws it, and the menu
         // isn't bitmap-stretched on scaled displays.
         SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        // ShellExecuteW (double-click opens the dashboard) wants COM set up
+        // on the calling thread, single-threaded as for any UI thread.
+        CoInitializeEx(std::ptr::null(), COINIT_APARTMENTTHREADED as u32);
 
         let instance = GetModuleHandleW(std::ptr::null());
         let class = wide(CLASS_NAME);
@@ -426,6 +434,7 @@ fn run(
             ..Default::default()
         };
         icon.Anonymous.uVersion = NOTIFYICON_VERSION_4;
+        let tooltip = format!("Vigil Collector\n{url}");
         let tip: Vec<u16> = tooltip.encode_utf16().take(icon.szTip.len() - 1).collect();
         icon.szTip[..tip.len()].copy_from_slice(&tip);
 
@@ -434,6 +443,7 @@ fn run(
             events,
             taskbar_created: RegisterWindowMessageW(wide("TaskbarCreated").as_ptr()),
             connections,
+            url: wide(&url),
         }));
 
         if Shell_NotifyIconW(NIM_ADD, &icon) == 0 {
@@ -523,6 +533,25 @@ unsafe fn show_menu(hwnd: HWND) {
     }
 }
 
+/// Opens the dashboard in the default browser.
+fn open_dashboard() {
+    let Some(url) = STATE.with_borrow(|s| s.as_ref().map(|s| s.url.clone())) else {
+        return;
+    };
+    let open = wide("open");
+    // SAFETY: both strings are NUL-terminated and outlive the call.
+    unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            open.as_ptr(),
+            url.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            SW_SHOWNORMAL,
+        );
+    }
+}
+
 /// A 32-bit bitmap of the green dot, ``size`` pixels square, which menus
 /// draw with its transparency. Null if it couldn't be made.
 fn dot_bitmap(size: i32) -> HBITMAP {
@@ -600,8 +629,10 @@ unsafe extern "system" fn window_proc(
             WM_TRAY => {
                 // With NOTIFYICON_VERSION_4 the event is in the low word.
                 let event = (lparam as u32) & 0xFFFF;
-                if event == WM_CONTEXTMENU || event == WM_RBUTTONUP {
-                    show_menu(hwnd);
+                match event {
+                    WM_CONTEXTMENU | WM_RBUTTONUP => show_menu(hwnd),
+                    WM_LBUTTONDBLCLK => open_dashboard(),
+                    _ => {}
                 }
                 0
             }
