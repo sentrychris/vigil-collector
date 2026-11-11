@@ -49,7 +49,7 @@ src/
 │   ├── worker.rs        single-use 5-second token registry for WS handshake
 │   └── probes.rs        external HTTP health checks (parallel reqwest)
 build.rs                 runs `npm ci` / `vite build` in web/ so the binary can embed web/dist
-                         (and, for Windows targets, gives the .exe the favicon as its icon)
+                         (and, for Windows targets, gives the .exe its icon and version details)
 web/                     the Vue dashboard (Vite + TypeScript), served at / from the binary
 ```
 

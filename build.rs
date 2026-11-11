@@ -7,8 +7,9 @@
 //! earlier CI step).
 //!
 //! For Windows targets it also gives the executable the dashboard's
-//! favicon as its icon (see ``windows_icon``), so Explorer and the taskbar
-//! show the same picture as the tray.
+//! favicon as its icon, so Explorer and the taskbar show the same picture
+//! as the tray, and the version details Explorer shows under Properties >
+//! Details (see ``windows_resources``).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -32,7 +33,7 @@ fn main() {
     // CARGO_CFG_* describe the target, which differs from the host when
     // cross-compiling.
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
-        windows_icon();
+        windows_resources();
     }
 
     let web = Path::new("web");
@@ -82,29 +83,34 @@ fn npm(args: &[&str]) {
     }
 }
 
-/// The executable's icon. Windows reads it from the program's resources: one
-/// ``RT_ICON`` per image and an ``RT_GROUP_ICON`` directory listing them.
-/// This writes those straight from ``favicon.ico`` into a compiled resource
-/// file (``.res``), so no resource compiler is needed with MSVC, whose
-/// linker takes ``.res`` files as they are. The GNU linker doesn't, so
-/// there MinGW's ``windres`` turns it into an object file first; without
-/// ``windres`` the build goes on and the program just has no icon.
-fn windows_icon() {
+/// The executable's icon and version details. Windows reads both from the
+/// program's resources: the icon as one ``RT_ICON`` per image plus an
+/// ``RT_GROUP_ICON`` directory listing them, the details as an
+/// ``RT_VERSION``. This writes them straight into a compiled resource file
+/// (``.res``), so no resource compiler is needed with MSVC, whose linker
+/// takes ``.res`` files as they are. The GNU linker doesn't, so there
+/// MinGW's ``windres`` turns it into an object file first; without
+/// ``windres`` the build goes on and the program just has no icon or
+/// details.
+fn windows_resources() {
     const ICO: &str = "web/public/favicon.ico";
     println!("cargo:rerun-if-changed={ICO}");
+    // The version details come from the package's version and authors.
+    println!("cargo:rerun-if-changed=Cargo.toml");
     let ico = std::fs::read(ICO).unwrap_or_else(|e| fail(&format!("reading {ICO}: {e}")));
-    let res =
+    let mut res =
         icon_resources(&ico).unwrap_or_else(|| fail(&format!("{ICO} isn't a valid icon file.")));
+    push_resource(&mut res, RT_VERSION, 1, &version_info());
 
     let out = PathBuf::from(std::env::var_os("OUT_DIR").expect("OUT_DIR is set by cargo"));
-    let res_path = out.join("icon.res");
-    std::fs::write(&res_path, res).unwrap_or_else(|e| fail(&format!("writing icon.res: {e}")));
+    let res_path = out.join("resources.res");
+    std::fs::write(&res_path, res).unwrap_or_else(|e| fail(&format!("writing resources.res: {e}")));
 
     if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
         println!("cargo:rustc-link-arg-bins={}", res_path.display());
         return;
     }
-    let obj = out.join("icon.o");
+    let obj = out.join("resources.o");
     let windres = windres();
     let status = Command::new(&windres)
         .arg("--input-format=res")
@@ -116,7 +122,9 @@ fn windows_icon() {
         .status();
     match status {
         Ok(s) if s.success() => println!("cargo:rustc-link-arg-bins={}", obj.display()),
-        _ => println!("cargo:warning=couldn't run {windres}, so the program has no icon"),
+        _ => println!(
+            "cargo:warning=couldn't run {windres}, so the program has no icon or version details"
+        ),
     }
 }
 
@@ -174,12 +182,181 @@ fn icon_resources(ico: &[u8]) -> Option<Vec<u8>> {
     Some(res)
 }
 
+const RT_VERSION: u16 = 16;
+/// English (United Kingdom), with strings in UTF-16 (code page 1200).
+const LANGUAGE: u16 = 0x0809;
+const CODE_PAGE: u16 = 1200;
+/// First year of the project's history, for the copyright line.
+const FIRST_YEAR: u32 = 2022;
+
+/// The ``VS_VERSIONINFO`` that Explorer shows under Properties > Details
+/// and Task Manager shows as the description and publisher.
+fn version_info() -> Vec<u8> {
+    let env = |key: &str| std::env::var(key).unwrap_or_default();
+    let version = env("CARGO_PKG_VERSION");
+    // "Chris Rowles <email>" -> "Chris Rowles"; several authors are ":"-separated.
+    let authors = env("CARGO_PKG_AUTHORS");
+    let author = authors.split(':').next().unwrap_or_default();
+    let author = author
+        .split('<')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let year = current_year();
+    let years = if year > FIRST_YEAR {
+        format!("{FIRST_YEAR}-{year}")
+    } else {
+        FIRST_YEAR.to_string()
+    };
+
+    let strings: [(&str, String); 8] = [
+        ("CompanyName", author.clone()),
+        ("FileDescription", "Vigil Collector".into()),
+        ("FileVersion", version.clone()),
+        ("InternalName", "vigil-collector".into()),
+        (
+            "LegalCopyright",
+            format!("Copyright \u{a9} {years} {author}"),
+        ),
+        ("OriginalFilename", "vigil-collector.exe".into()),
+        ("ProductName", "Vigil".into()),
+        ("ProductVersion", version.clone()),
+    ];
+    let table = strings
+        .iter()
+        .map(|(key, value)| {
+            let mut text = utf16(value);
+            text.push(0);
+            ver_block(key, (text.len()) as u16, 1, &bytes(&text), &[])
+        })
+        .collect::<Vec<_>>();
+    let table_key = format!("{LANGUAGE:04X}{CODE_PAGE:04X}");
+    let string_file_info = ver_block(
+        "StringFileInfo",
+        0,
+        1,
+        &[],
+        &[ver_block(&table_key, 0, 1, &[], &table)],
+    );
+    let translation = [LANGUAGE.to_le_bytes(), CODE_PAGE.to_le_bytes()].concat();
+    let var_file_info = ver_block(
+        "VarFileInfo",
+        0,
+        1,
+        &[],
+        &[ver_block("Translation", 4, 0, &translation, &[])],
+    );
+
+    // VS_FIXEDFILEINFO: the numeric versions, as major.minor.patch.0.
+    let mut parts = version
+        .split(['.', '-', '+'])
+        .map(|p| p.parse::<u32>().unwrap_or(0));
+    let mut next = || parts.next().unwrap_or(0) & 0xFFFF;
+    let (major, minor, patch) = (next(), next(), next());
+    let (ms, ls) = (major << 16 | minor, patch << 16);
+    let fixed: Vec<u8> = [
+        0xFEEF_04BD, // signature
+        0x0001_0000, // structure version 1.0
+        ms,
+        ls, // file version
+        ms,
+        ls,          // product version
+        0x3F,        // flags mask
+        0,           // flags
+        0x0004_0004, // VOS_NT_WINDOWS32
+        1,           // VFT_APP
+        0,           // subtype
+        0,
+        0, // date
+    ]
+    .iter()
+    .flat_map(|n: &u32| n.to_le_bytes())
+    .collect();
+
+    ver_block(
+        "VS_VERSION_INFO",
+        fixed.len() as u16,
+        0,
+        &fixed,
+        &[string_file_info, var_file_info],
+    )
+}
+
+/// One block of a version resource: its length, value length (in UTF-16
+/// units for text, bytes otherwise) and type, its NUL-terminated key, its
+/// value and its children, each starting on a 4-byte boundary.
+fn ver_block(key: &str, value_len: u16, kind: u16, value: &[u8], children: &[Vec<u8>]) -> Vec<u8> {
+    let mut out = vec![0, 0];
+    out.extend_from_slice(&value_len.to_le_bytes());
+    out.extend_from_slice(&kind.to_le_bytes());
+    let mut name = utf16(key);
+    name.push(0);
+    out.extend_from_slice(&bytes(&name));
+    pad4(&mut out);
+    out.extend_from_slice(value);
+    for child in children {
+        pad4(&mut out);
+        out.extend_from_slice(child);
+    }
+    let len = out.len() as u16;
+    out[..2].copy_from_slice(&len.to_le_bytes());
+    out
+}
+
+fn utf16(s: &str) -> Vec<u16> {
+    s.encode_utf16().collect()
+}
+
+fn bytes(units: &[u16]) -> Vec<u8> {
+    units.iter().flat_map(|u| u.to_le_bytes()).collect()
+}
+
+fn pad4(out: &mut Vec<u8>) {
+    while !out.len().is_multiple_of(4) {
+        out.push(0);
+    }
+}
+
+/// The current year (UTC), or the first year if the clock is unreadable.
+/// Honours ``SOURCE_DATE_EPOCH`` for reproducible builds.
+fn current_year() -> u32 {
+    println!("cargo:rerun-if-env-changed=SOURCE_DATE_EPOCH");
+    let secs = std::env::var("SOURCE_DATE_EPOCH")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .or_else(|| {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .ok()
+                .map(|d| d.as_secs())
+        });
+    let Some(secs) = secs else {
+        return FIRST_YEAR;
+    };
+    // Civil-from-days (Howard Hinnant's algorithm), keeping only the year.
+    let days = (secs / 86_400) as i64 + 719_468;
+    let era = days.div_euclid(146_097);
+    let doe = days.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let year = yoe + era * 400 + i64::from(mp >= 10);
+    year as u32
+}
+
 /// Appends one resource with a numeric type and id to a ``.res`` file.
 fn push_resource(res: &mut Vec<u8>, kind: u16, id: u16, data: &[u8]) {
     const HEADER_SIZE: u32 = 32;
-    // MOVEABLE | DISCARDABLE and US English, as resource compilers write
-    // by default (Windows falls back to it whatever the system language).
-    let (flags, language): (u16, u16) = if kind == 0 { (0, 0) } else { (0x1010, 0x0409) };
+    // As resource compilers write them: icons MOVEABLE | DISCARDABLE, the
+    // version MOVEABLE | PURE, both tagged US English (Windows falls back
+    // to it whatever the system language).
+    let flags: u16 = match kind {
+        0 => 0,
+        RT_VERSION => 0x0030,
+        _ => 0x1010,
+    };
+    let language: u16 = if kind == 0 { 0 } else { 0x0409 };
     res.extend_from_slice(&(data.len() as u32).to_le_bytes());
     res.extend_from_slice(&HEADER_SIZE.to_le_bytes());
     res.extend_from_slice(&[0xFF, 0xFF]);

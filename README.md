@@ -212,7 +212,8 @@ notification area. Right-click the icon for **Restart** and **Quit**,
 below which it shows how many dashboards are connected and the version.
 Double-click the icon to open the dashboard in your browser. Restart
 starts it again with the same options and re-reads the settings file. The
-executable has the same icon.
+executable has the same icon, and its Properties > Details tab shows the
+version.
 
 - **Double-clicked**, it goes straight to the tray, with no console
   window. If it can't start (for example, the port is already in use),
