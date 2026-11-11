@@ -81,6 +81,25 @@ fn enable_ansi() -> bool {
     true
 }
 
+/// Whether this process's console can show colour. The Windows tray
+/// launcher asks before starting the tray process, whose output is a pipe.
+#[cfg(windows)]
+pub fn console_supports_color() -> bool {
+    io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none() && enable_ansi()
+}
+
+/// The tray process writes to a pipe that the launcher relays to its
+/// console, so it takes the launcher's word on colour.
+#[cfg(windows)]
+fn forced_color() -> bool {
+    std::env::var_os(crate::tray::COLOR_ENV).is_some()
+}
+
+#[cfg(not(windows))]
+fn forced_color() -> bool {
+    false
+}
+
 /// Initialize tracing once. Truncates the existing log file on startup and
 /// writes to both file and stdout. ``enabled = false`` mutes both layers
 /// entirely. A log file that can't be opened (read-only home, locked by
@@ -102,8 +121,8 @@ pub fn init(level: &str, enabled: bool) {
     let env_filter =
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(directive));
 
-    let ansi =
-        io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none() && enable_ansi();
+    let ansi = std::env::var_os("NO_COLOR").is_none()
+        && (forced_color() || (io::stdout().is_terminal() && enable_ansi()));
 
     let console_layer = tracing_subscriber::fmt::layer()
         .with_writer(io::stdout)

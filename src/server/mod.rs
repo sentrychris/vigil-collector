@@ -90,6 +90,8 @@ where
         .await
         .map_err(|e| anyhow::anyhow!("could not listen on {addr}: {e}"))?;
     tracing::info!("Listening on http://{}", addr);
+    #[cfg(windows)]
+    crate::tray::notify_listening();
     axum::serve(listener, app)
         .with_graceful_shutdown(async move {
             shutdown.await;

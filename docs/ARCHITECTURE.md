@@ -25,9 +25,11 @@ HTTP and WebSocket handlers read without further work.
 ```
 src/
 ├── main.rs              entry point; wires runtime, signals, sampler, server
-├── cli.rs               clap parser for command-line flags (--address, --port)
+├── cli.rs               clap parser for command-line flags (--address, --port, --foreground)
 ├── config.rs            settings.json load + first-run defaults + migration
 ├── log.rs               tracing setup (stdout + file, classic timestamp, Windows ANSI)
+├── tray.rs              Windows: launcher hand-off and the notification-area icon + menu
+├── ico.rs               picks the right-sized image out of the .ico for the tray
 ├── snapshot.rs          shared data model + per-endpoint projections
 ├── sampler.rs           1 Hz tick loop, refresh state, ArcSwap JSON cache
 ├── metrics/             per-domain collectors (stateless over sysinfo)
@@ -64,7 +66,7 @@ every field is always present in the payload:
 | Load average | `getloadavg(3)` | `null` | `getloadavg(3)` |
 | Process memory | PSS when readable, else RSS | working set (`"rss"`) | RSS |
 | Net drop counters | `/proc/net/dev` | `0` | `0` |
-| Shutdown signals | Ctrl-C, SIGTERM | Ctrl-C, Ctrl-Break, console close, logoff, shutdown | Ctrl-C, SIGTERM |
+| Shutdown signals | Ctrl-C, SIGTERM | Tray menu (Quit/Restart), Ctrl-C, Ctrl-Break, console close, logoff, shutdown | Ctrl-C, SIGTERM |
 
 ## Data flow
 
@@ -134,6 +136,16 @@ HEAD/GET checks against the configured probe URLs.
                                        Win32 disk/process queries
 
 ```
+
+On Windows, unless `--foreground` is given (or there's no desktop, or
+output is redirected), the process that was started is only a launcher:
+it starts a console-less copy with `VIGIL_TRAY_CHILD=1`, relays its
+startup log until the copy prints a private "listening" line, and exits.
+The copy runs the model above plus one OS thread, `tray`, which owns a
+hidden window, the notification-area icon and the Win32 message loop.
+Menu choices reach the signal task over an unbounded channel; Restart
+sets a flag that makes `main` start a fresh copy after the server and
+sampler have stopped and the icon is removed.
 
 Single runtime thread for everything async. Heavy syscalls go to the blocking
 pool so the runtime thread stays unblocked.

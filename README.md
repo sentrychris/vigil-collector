@@ -199,9 +199,32 @@ address it's listening on:
 ```
 
 **Stopping:** `Ctrl-C`, or `SIGTERM` on Linux and macOS. On Windows,
-`Ctrl-Break`, closing the console window, signing out and shutting down
-also stop it cleanly. Connected WebSocket clients get a `1001 Going Away`
-close frame, so dashboards can tell a restart from a crash.
+use the tray menu (below), or with `--foreground`, `Ctrl-C`,
+`Ctrl-Break` or closing the console window. Signing out and shutting
+down stop it cleanly too. Connected WebSocket clients get a
+`1001 Going Away` close frame, so dashboards can tell a restart from a
+crash.
+
+### The system tray on Windows
+
+On Windows the collector runs in the background with an icon in the
+notification area. Right-click the icon for **Restart**, **Quit** and the
+version. Restart starts it again with the same options and re-reads the
+settings file.
+
+- **Double-clicked**, it goes straight to the tray, with no console
+  window. If it can't start (for example, the port is already in use),
+  a message box says why.
+- **From a terminal**, it prints its startup log, including the
+  `Listening on ...` line, then gives you the prompt back while it keeps
+  running in the tray. Closing the terminal doesn't stop it.
+- **`--foreground`** keeps it in the console instead, with no tray icon,
+  as on Linux and macOS. It also stays in the console on its own when its
+  output is redirected to a file or pipe, and when it runs as a service
+  or a `SYSTEM` task, which have no desktop to show an icon on.
+
+In the tray, the log is written only to the log file (see
+[Configuration](#configuration)).
 
 ## Running in the background
 
@@ -224,13 +247,17 @@ settings file lives in the home folder of the `User=` you chose.
 
 ### Windows (Task Scheduler)
 
-The collector is a console program, not a Windows service. To start it at
-boot with no console window, register a scheduled task that runs it as
-`SYSTEM`. From an **elevated** PowerShell:
+To have it running whenever you're signed in, with its tray icon, put a
+shortcut to the exe in your Startup folder (`Win+R`, `shell:startup`).
+
+To start it at boot, before anyone signs in, register a scheduled task
+that runs it as `SYSTEM`. It isn't a Windows service, and a `SYSTEM` task
+has no tray icon, so `--foreground` keeps it in its own (invisible)
+console. From an **elevated** PowerShell:
 
 ```powershell
 $exe = "C:\Program Files\Vigil\vigil-collector.exe"   # wherever you put it
-$action = New-ScheduledTaskAction -Execute $exe -Argument "--address 0.0.0.0 --port 4500"
+$action = New-ScheduledTaskAction -Execute $exe -Argument "--foreground --address 0.0.0.0 --port 4500"
 $trigger = New-ScheduledTaskTrigger -AtStartup
 $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) `
     -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)

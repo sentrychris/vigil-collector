@@ -71,7 +71,8 @@ jobs:
         run: |
           bin=target/release/vigil-collector
           [ -f "$bin.exe" ] && bin="$bin.exe"
-          "$bin" --port 4599 &
+          # --foreground: on Windows, stay in this shell instead of the tray.
+          "$bin" --foreground --port 4599 &
           pid=$!
           for _ in $(seq 1 30); do
             curl -sf http://localhost:4599/system >/dev/null && break
