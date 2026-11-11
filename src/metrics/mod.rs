@@ -4,6 +4,10 @@ pub mod mem;
 pub mod net;
 pub mod platform;
 pub mod process;
+#[cfg(any(windows, test))]
+mod temp_parse;
+#[cfg(windows)]
+pub mod temp_windows;
 
 /// Convert bytes to GiB rounded to 2 decimal places. Mirrors the Python
 /// ``convert_bytes`` helper so the wire format stays identical.

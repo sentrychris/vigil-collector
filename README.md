@@ -340,7 +340,7 @@ Current snapshot of the host. Same payload that the WebSocket pushes.
 | Field | Type | Description |
 |---|---|---|
 | `cpu.usage` | number | CPU utilization, % |
-| `cpu.temp` | number | Package temperature, °C (`0` if no sensor; always `0` on Windows) |
+| `cpu.temp` | number | Package temperature, °C (`0` if no sensor; see [Platform notes](#platform-notes) for Windows) |
 | `cpu.freq` | number | Current frequency, MHz |
 | `cpu.cores` | number | Logical core count |
 | `cpu.load` | array / null | 1/5/15-minute load average (`null` on Windows) |
@@ -426,7 +426,7 @@ WebSocket frees it. A connect refused with `503` (server at
 |---|---|---|---|
 | Disk usage | `statvfs`, `df`-exact | `GetDiskFreeSpaceExW` | `statvfs` |
 | Disk I/O + IOPS | `/proc/diskstats` | `IOCTL_DISK_PERFORMANCE` per physical drive | not reported (`0`) |
-| CPU temperature | hwmon / thermal zones | not reported (`0`) | SMC sensors |
+| CPU temperature | hwmon / thermal zones | from a monitoring app or a live ACPI thermal zone, else `0` (see below) | SMC sensors |
 | Load average | yes | `null` | yes |
 | Process memory | PSS when readable, else RSS | working set | RSS |
 | Dropped packets | yes | `0` | `0` |
@@ -438,6 +438,29 @@ On Windows, network throughput leaves out NDIS filter interfaces (such as
 "WiFi-VirtualBox NDIS Light-Weight Filter-0000"), which mirror the adapter
 underneath them and would otherwise count its traffic twice. Hyper-V / WSL
 virtual switches are kept, like `docker0` on Linux.
+
+### CPU temperature on Windows
+
+Windows has no built-in way for a program to read the CPU's own
+temperature sensor without a kernel driver, which is why Task Manager
+doesn't show it. The collector doesn't ship a driver. Instead it checks
+these once a second and uses the first that has a reading:
+
+1. **HWiNFO**, with *Shared Memory Support* turned on in its settings. The
+   free version switches this off again after 12 hours.
+2. **MSI Afterburner**. It has to run in the same Windows session as the
+   collector, so this doesn't work when the collector runs as a `SYSTEM`
+   task.
+3. **LibreHardwareMonitor** (or OpenHardwareMonitor), through its WMI
+   sensors.
+4. **The ACPI thermal zone** Windows exposes itself. Many desktops report a
+   fixed placeholder there (often 27.85 °C), so a zone is only used once
+   its value has changed since the collector started. On laptops it is
+   often real, but it may be a board or chassis sensor rather than the CPU
+   package.
+
+If none of these is available, `cpu.temp` is `0`, as before. The log says
+which source is in use, and when the source changes.
 
 ## Development
 

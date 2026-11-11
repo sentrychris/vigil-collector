@@ -31,7 +31,9 @@ src/
 ├── snapshot.rs          shared data model + per-endpoint projections
 ├── sampler.rs           1 Hz tick loop, refresh state, ArcSwap JSON cache
 ├── metrics/             per-domain collectors (stateless over sysinfo)
-│   ├── cpu.rs           usage, freq, package temp (Unix), load average (Unix)
+│   ├── cpu.rs           usage, freq, package temp, load average (Unix)
+│   ├── temp_windows.rs  Windows CPU temp reader thread (shared memory, WMI, PDH)
+│   ├── temp_parse.rs    parsers for those sources (tested on every platform)
 │   ├── mem.rs           total/used/free/percent (psutil-compatible)
 │   ├── disk.rs          root + all mounts (statvfs / GetDiskFreeSpaceExW)
 │   │                    + I/O deltas (/proc/diskstats / IOCTL_DISK_PERFORMANCE)
@@ -56,7 +58,7 @@ every field is always present in the payload:
 |---|---|---|---|
 | Disk usage | `statvfs` (psutil/df arithmetic) | `GetDiskFreeSpaceExW` | `statvfs` |
 | Disk I/O + IOPS | `/proc/diskstats`, whole disks | `IOCTL_DISK_PERFORMANCE` on `\\.\PhysicalDriveN` | zeros |
-| CPU temperature | sysinfo components, then `/sys/class/thermal` | `0` | sysinfo components |
+| CPU temperature | sysinfo components, then `/sys/class/thermal` | HWiNFO / Afterburner shared memory, LibreHardwareMonitor WMI, live ACPI thermal zone, else `0` | sysinfo components |
 | Load average | `getloadavg(3)` | `null` | `getloadavg(3)` |
 | Process memory | PSS when readable, else RSS | working set (`"rss"`) | RSS |
 | Net drop counters | `/proc/net/dev` | `0` | `0` |

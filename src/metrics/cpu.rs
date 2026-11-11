@@ -5,18 +5,19 @@ use sysinfo::System;
 
 use crate::snapshot::Cpu;
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 use super::round1;
 use super::round2;
 
-/// Temperature sensors. sysinfo's ``Components`` only exists when its
-/// ``component`` feature is on, which Cargo.toml enables for Unix targets
-/// only; on Windows this is an empty stand-in so the sampler can hold one
-/// unconditionally.
-#[derive(Default)]
+/// Temperature sensors. On Unix this is sysinfo's ``Components`` (its
+/// ``component`` feature is enabled for Unix targets only). On Windows it
+/// is a background reader over monitoring apps and the ACPI thermal zone
+/// (see ``temp_windows.rs``).
 pub struct Sensors {
     #[cfg(unix)]
     components: Option<sysinfo::Components>,
+    #[cfg(windows)]
+    windows: super::temp_windows::CpuTemp,
 }
 
 impl Sensors {
@@ -24,6 +25,8 @@ impl Sensors {
         Self {
             #[cfg(unix)]
             components: sysinfo::Components::new_with_refreshed_list().ok(),
+            #[cfg(windows)]
+            windows: super::temp_windows::CpuTemp::start(),
         }
     }
 
@@ -54,11 +57,15 @@ fn read_cpu_temp(components: &Sensors) -> f64 {
     read_via_components(components).unwrap_or(0.0)
 }
 
-/// Windows reports ``0``, like psutil. The only sensor Windows exposes
-/// without a kernel driver is WMI's ``MSAcpi_ThermalZoneTemperature``,
-/// which needs admin rights and on most boards returns a fixed ACPI zone
-/// value rather than the CPU package temperature.
-#[cfg(not(unix))]
+/// Windows has no driver-free API for the CPU's own sensor; the reader
+/// takes it from HWiNFO, MSI Afterburner or LibreHardwareMonitor when one
+/// is running, else from a live ACPI thermal zone, else reports ``0``.
+#[cfg(windows)]
+fn read_cpu_temp(sensors: &Sensors) -> f64 {
+    sensors.windows.read().map_or(0.0, round1)
+}
+
+#[cfg(not(any(unix, windows)))]
 fn read_cpu_temp(_sensors: &Sensors) -> f64 {
     0.0
 }

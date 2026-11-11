@@ -45,7 +45,7 @@ time = { version = "0.3", features = ["formatting", "macros", "local-offset"] }
 libc = "0.2"
 # Temperature sensors. Not enabled on Windows: sysinfo reads them there via
 # a WMI query that needs admin rights and reports an ACPI zone rather than
-# the CPU package, so Windows reports ``0`` (see metrics/cpu.rs).
+# the CPU package; metrics/temp_windows.rs has its own sources instead.
 sysinfo = { version = "0.40", default-features = false, features = ["component"] }
 
 [target.'cfg(windows)'.dependencies]
@@ -58,7 +58,11 @@ windows-sys = { version = "0.61", features = [
     "Win32_System_Console",
     "Win32_System_IO",
     "Win32_System_Ioctl",
+    "Win32_System_Memory",
+    "Win32_System_Performance",
 ] }
+# LibreHardwareMonitor's sensors, read through its WMI namespace.
+wmi = { version = "0.18", default-features = false }
 
 [profile.release]
 opt-level = 3

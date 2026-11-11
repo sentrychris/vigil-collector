@@ -31,7 +31,7 @@ struct SamplerState {
     sys: System,                              // CPU, memory, processes
     disks: Disks,                             // mount table + per-mount info
     networks: Networks,                       // per-iface counters
-    sensors: Sensors,                         // temperature (empty on Windows)
+    sensors: Sensors,                         // temperature (reader thread on Windows)
     users: Users,                             // uid/SID -> name lookup
     cores: u32,
     disk_io_prev: Option<DiskIoPrev>,         // for disk I/O counter deltas
@@ -168,10 +168,15 @@ and returns a fresh value.
 - `freq`: arithmetic mean of per-core frequencies (filtering zeros).
 - `cores`: cached at startup.
 - `temp`: priority-list lookup over labelled components ("package", "tctl",
-  "tdie", "cpu") with a fallback to `/sys/class/thermal/` on Linux. Windows
-  always reports `0`, like psutil: the only driverless source is WMI's
-  ACPI thermal zone, which needs admin and usually isn't the CPU package.
-  sysinfo's `component` feature is therefore only enabled on Unix.
+  "tdie", "cpu") with a fallback to `/sys/class/thermal/` on Linux.
+  Windows has no driverless API for the CPU sensor, so sysinfo's
+  `component` feature is Unix-only and `metrics/temp_windows.rs` runs a
+  1 Hz thread instead. It reads HWiNFO's and MSI Afterburner's shared
+  memory, LibreHardwareMonitor's WMI namespace, then the "Thermal Zone
+  Information" PDH counters, and publishes the first reading through an
+  atomic the sampler loads. A thermal zone only counts once its value has
+  moved, because many desktops report a fixed placeholder. With no source
+  the value is `0`, as on psutil.
 - `load`: `[1m, 5m, 15m]` via `libc::getloadavg(3)` for full kernel
   precision (sysinfo's `/proc/loadavg` parser truncates to 2 decimals).
   `null` on Windows, which has no load average.
