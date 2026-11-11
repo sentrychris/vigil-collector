@@ -55,10 +55,56 @@ pub fn router(state: AppState) -> Router {
         .with_state(state)
 }
 
+/// How many ports ``bind`` tries when it may move to the next free one.
+pub const PORT_SEARCH: u16 = 100;
+
+/// Opens the listening socket on ``addr``. With ``search`` (the Windows
+/// tray, double-clicked, with no ``--port``), a port that's taken moves it
+/// on to the next one, up to ``PORT_SEARCH`` ports, so a second copy or
+/// another program on the default port doesn't stop it starting.
+pub async fn bind(addr: SocketAddr, search: bool) -> anyhow::Result<tokio::net::TcpListener> {
+    let tries = if search { PORT_SEARCH } else { 1 };
+    let mut last_error = None;
+    for offset in 0..tries {
+        let Some(port) = addr.port().checked_add(offset) else {
+            break;
+        };
+        let candidate = SocketAddr::new(addr.ip(), port);
+        match tokio::net::TcpListener::bind(candidate).await {
+            Ok(listener) => {
+                if offset > 0 {
+                    tracing::warn!("Port {} is in use, so using {} instead", addr.port(), port);
+                }
+                return Ok(listener);
+            }
+            // Windows reports ports it reserves (Hyper-V, WSL) as access
+            // denied rather than in use; both mean "try the next one".
+            Err(e)
+                if search
+                    && matches!(
+                        e.kind(),
+                        std::io::ErrorKind::AddrInUse | std::io::ErrorKind::PermissionDenied
+                    ) =>
+            {
+                last_error = Some(e);
+            }
+            Err(e) => return Err(anyhow::anyhow!("could not listen on {candidate}: {e}")),
+        }
+    }
+    let last = addr.port().saturating_add(tries - 1);
+    Err(anyhow::anyhow!(
+        "could not find a free port from {} to {last} on {}: {}",
+        addr.port(),
+        addr.ip(),
+        last_error.map_or_else(|| "none left".to_string(), |e| e.to_string())
+    ))
+}
+
+/// Serves on ``listener`` (from ``bind``) until ``shutdown`` resolves.
 /// ``active_ws`` counts the open WebSocket sessions (dashboards watching
 /// live). The caller owns it so the Windows tray menu can show it.
 pub async fn serve<F>(
-    addr: SocketAddr,
+    listener: tokio::net::TcpListener,
     sampler: &Sampler,
     settings: &crate::config::Settings,
     active_ws: Arc<AtomicUsize>,
@@ -87,9 +133,7 @@ where
     };
 
     let app = router(state);
-    let listener = tokio::net::TcpListener::bind(addr)
-        .await
-        .map_err(|e| anyhow::anyhow!("could not listen on {addr}: {e}"))?;
+    let addr = listener.local_addr()?;
     tracing::info!("Listening on http://{}", addr);
     #[cfg(windows)]
     crate::tray::notify_listening();
@@ -113,4 +157,18 @@ where
         tracing::debug!("shutdown: WebSocket sessions did not close in time");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod bind_tests {
+    use super::bind;
+
+    #[tokio::test]
+    async fn moves_past_a_taken_port_only_when_searching() {
+        let taken = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = taken.local_addr().unwrap();
+        assert!(bind(addr, false).await.is_err());
+        let moved = bind(addr, true).await.unwrap();
+        assert!(moved.local_addr().unwrap().port() > addr.port());
+    }
 }

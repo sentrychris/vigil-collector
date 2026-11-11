@@ -216,11 +216,15 @@ executable has the same icon, and its Properties > Details tab shows the
 version.
 
 - **Double-clicked**, it goes straight to the tray, with no console
-  window. If it can't start (for example, the port is already in use),
-  a message box says why.
+  window. If its port (4500 unless the settings file says otherwise) is
+  already in use, it takes the next free one, up to 99 ports further on;
+  hover over the icon to see which. If it can't start at all, a message
+  box says why.
 - **From a terminal**, it prints its startup log, including the
   `Listening on ...` line, then gives you the prompt back while it keeps
-  running in the tray. Closing the terminal doesn't stop it.
+  running in the tray. Closing the terminal doesn't stop it. Here, and
+  whenever `--port` is given, the port is used exactly as set: if it's
+  taken, the collector stops with an error.
 - **`--foreground`** keeps it in the console instead, with no tray icon,
   as on Linux and macOS. It also stays in the console on its own when its
   output is redirected to a file or pipe, and when it runs as a service

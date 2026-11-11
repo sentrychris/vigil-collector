@@ -149,6 +149,10 @@ sets a flag that makes `main` start a fresh copy after the server and
 sampler have stopped and the icon is removed. The menu's connection count
 is the server's `active_ws` counter, which `main` creates and shares with
 both.
+A double-clicked launcher also sets `VIGIL_FIND_FREE_PORT=1`, which lets
+`server::bind` move past a taken port (without `--port`) instead of
+failing; `main` binds before starting the tray so the tooltip and
+double-click URL show the port actually used.
 
 Single runtime thread for everything async. Heavy syscalls go to the blocking
 pool so the runtime thread stays unblocked.

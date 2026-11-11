@@ -70,6 +70,10 @@ const CHILD_ENV: &str = "VIGIL_TRAY_CHILD";
 /// Set on the tray process when the launcher's console shows colour, so
 /// the log lines it relays keep their colours.
 pub const COLOR_ENV: &str = "VIGIL_FORCE_COLOR";
+/// Set on the tray process when it was double-clicked: if the port is
+/// taken, it moves on to the next free one (see ``server::bind``).
+/// Restarts inherit it.
+const FREE_PORT_ENV: &str = "VIGIL_FIND_FREE_PORT";
 /// Printed by the tray process once it is listening, so the launcher
 /// knows when to exit even with logging turned off. Never shown.
 const READY_LINE: &str = "vigil-collector:listening";
@@ -181,6 +185,9 @@ pub fn launch(color: bool) -> ! {
         if color {
             cmd.env(COLOR_ENV, "1");
         }
+        if double_clicked {
+            cmd.env(FREE_PORT_ENV, "1");
+        }
         cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()
     });
     let mut child = match child {
@@ -274,6 +281,11 @@ fn mode_is_tray() -> bool {
 
 /// Starts a fresh tray process with the same arguments. Used by Restart,
 /// after this one has stopped listening.
+/// Whether a taken port should move this process on to the next free one.
+pub fn find_free_port() -> bool {
+    std::env::var_os(FREE_PORT_ENV).is_some_and(|v| v == "1")
+}
+
 pub fn respawn() -> std::io::Result<()> {
     tray_command()?
         .stdout(Stdio::null())

@@ -71,6 +71,18 @@ async fn main() -> anyhow::Result<()> {
     let port = args.port.unwrap_or(settings.port_number);
     let addr = resolve_addr(&address, port)?;
 
+    // Double-clicked on Windows with no --port: if the port is taken, use
+    // the next free one rather than fail. A port given on the command line
+    // is always used as-is.
+    #[cfg(windows)]
+    let search = args.port.is_none() && tray::find_free_port();
+    #[cfg(not(windows))]
+    let search = false;
+    let listener = server::bind(addr, search).await?;
+    // The tray shows the port actually in use.
+    #[cfg(windows)]
+    let addr = listener.local_addr()?;
+
     let mut sampler = Sampler::new(settings.ws_push_interval);
     sampler.start()?;
 
@@ -127,7 +139,7 @@ async fn main() -> anyhow::Result<()> {
     });
 
     let server_shutdown = shutdown.clone();
-    let serve_result = server::serve(addr, &sampler, &settings, active_ws, async move {
+    let serve_result = server::serve(listener, &sampler, &settings, active_ws, async move {
         server_shutdown.notified().await;
     })
     .await;
