@@ -111,7 +111,8 @@ cargo build --release
 ```
 
 The binary is `target\release\vigil-collector.exe`. Copy it anywhere, for
-example `C:\Program Files\Vigil\`. It needs no installer, and the C runtime
+example `C:\Program Files\Vigil\` (writing there needs an elevated
+PowerShell). It needs no installer, and the C runtime
 is linked in statically (see [.cargo/config.toml](.cargo/config.toml)), so
 it runs on machines without the Visual C++ Redistributable.
 
@@ -226,8 +227,24 @@ Start-ScheduledTask -TaskName "Vigil Collector"
 
 Running as `SYSTEM`, its home folder is
 `C:\Windows\System32\config\systemprofile`, so its settings file and logs
-are under that folder rather than yours. To remove the task:
-`Unregister-ScheduledTask -TaskName "Vigil Collector"`.
+are under that folder rather than yours.
+
+A task running as `SYSTEM` has no desktop, so Windows Defender Firewall
+can't ask whether to allow it, and other machines are blocked. If you
+listen on `0.0.0.0`, add an inbound rule for the exe (same elevated
+PowerShell):
+
+```powershell
+New-NetFirewallRule -DisplayName "Vigil Collector" -Direction Inbound `
+    -Program $exe -Action Allow -Profile Private
+```
+
+To remove the task and the rule:
+
+```powershell
+Unregister-ScheduledTask -TaskName "Vigil Collector" -Confirm:$false
+Remove-NetFirewallRule -DisplayName "Vigil Collector"
+```
 
 ### macOS (launchd)
 
