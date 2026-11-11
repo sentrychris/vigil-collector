@@ -1,10 +1,8 @@
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 use base64::Engine;
-use parking_lot::Mutex;
-use rand::RngCore;
 
 const TOKEN_BYTES: usize = 32;
 const EXPIRY: Duration = Duration::from_secs(5);
@@ -15,19 +13,25 @@ const EXPIRY: Duration = Duration::from_secs(5);
 /// (the ws layer owns its own connection lifetime, so the registry only
 /// needs to know about pending IDs).
 pub struct WorkerRegistry {
-    inner: Mutex<HashMap<String, ()>>,
+    inner: Mutex<HashSet<String>>,
 }
 
 impl WorkerRegistry {
     pub fn new() -> Self {
         Self {
-            inner: Mutex::new(HashMap::new()),
+            inner: Mutex::new(HashSet::new()),
         }
+    }
+
+    /// The set is only ever inserted into / removed from, so a panic while
+    /// holding the lock can't leave it inconsistent: recover from poison.
+    fn ids(&self) -> MutexGuard<'_, HashSet<String>> {
+        self.inner.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     pub fn issue(self: &Arc<Self>) -> String {
         let id = generate_id();
-        self.inner.lock().insert(id.clone(), ());
+        self.ids().insert(id.clone());
         let this = Arc::clone(self);
         let expire_id = id.clone();
         tokio::spawn(async move {
@@ -35,7 +39,7 @@ impl WorkerRegistry {
             // Best-effort cleanup. If the WS handler already claimed the
             // token, this is a no-op. If it hasn't, the token is now
             // dead and any future ``/connect?id=...`` rejects.
-            this.inner.lock().remove(&expire_id);
+            this.ids().remove(&expire_id);
         });
         id
     }
@@ -43,12 +47,14 @@ impl WorkerRegistry {
     /// Claim and remove the token. Returns true if the token was valid and
     /// is now consumed; false if it was missing or already expired.
     pub fn claim(&self, id: &str) -> bool {
-        self.inner.lock().remove(id).is_some()
+        self.ids().remove(id)
     }
 }
 
 fn generate_id() -> String {
     let mut buf = [0u8; TOKEN_BYTES];
-    rand::thread_rng().fill_bytes(&mut buf);
+    // The OS CSPRNG (getrandom(2) / BCryptGenRandom). It only fails if the
+    // OS has no entropy source at all, which no supported platform lacks.
+    getrandom::fill(&mut buf).expect("OS random number generator unavailable");
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(buf)
 }

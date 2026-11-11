@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Format
+        run: cargo fmt --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test
+
+      - name: Build release
+        run: cargo build --release
+
+      # Start the real binary and check every endpoint answers with the
+      # payload shape the dashboard expects.
+      - name: Smoke test
+        run: |
+          bin=target/release/vigil-collector
+          [ -f "$bin.exe" ] && bin="$bin.exe"
+          "$bin" --port 4599 &
+          pid=$!
+          for _ in $(seq 1 30); do
+            curl -sf http://localhost:4599/system >/dev/null && break
+            sleep 1
+          done
+          sleep 2
+          curl -sf http://localhost:4599/system  > system.json
+          curl -sf http://localhost:4599/network > network.json
+          curl -sf -X POST http://localhost:4599/worker > worker.json
+          curl -sf -o /dev/null http://localhost:4599/
+          kill "$pid" || true
+          py=python3; [ "$RUNNER_OS" = Windows ] && py=python
+          "$py" - <<'PY'
+          import json
+          system = json.load(open("system.json"))
+          for key in ["cpu", "mem", "disk", "disks", "disk_io", "network", "user",
+                      "platform", "processes", "processes_metric", "processes_by_cpu"]:
+              assert key in system, f"/system missing {key}"
+          assert system["mem"]["total"] > 0, "no memory reported"
+          assert system["disk"]["total"] > 0, "no primary disk reported"
+          assert system["disks"], "no disks listed"
+          assert system["processes"], "no processes listed"
+          assert system["platform"]["distro"], "no distro"
+          network = json.load(open("network.json"))
+          assert network["interfaces"], "no network interfaces"
+          worker = json.load(open("worker.json"))
+          assert worker["id"] and worker["url"].startswith("ws://")
+          print(json.dumps({k: system[k] for k in ["cpu", "mem", "disk", "disk_io", "platform", "processes_metric"]}, indent=2))
+          print("disks:", [(d["device"], d["mountpoint"]) for d in system["disks"]])
+          print("top by cpu:", [p["name"] for p in system["processes_by_cpu"]])
+          PY

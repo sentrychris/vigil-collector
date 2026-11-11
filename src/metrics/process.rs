@@ -17,8 +17,32 @@ struct Aggregated {
 #[derive(Default)]
 struct AggregatedCpu {
     cpu_pct: f64,
+    /// Representative pid: the group member using the most CPU.
     pid: u32,
+    pid_cpu: f64,
     usernames: BTreeSet<String>,
+}
+
+/// Entries the top-N lists never show. On Windows sysinfo reports pid 0,
+/// "System Idle Process", whose CPU% is the idle time of every core; left
+/// in, it tops ``processes_by_cpu`` on any machine that isn't saturated.
+fn skip_process(pid: Pid, proc_: &sysinfo::Process) -> bool {
+    // sysinfo can list kernel tasks (threads) on Linux. psutil counts only
+    // main processes, so threads here would (a) double-count RSS for any
+    // multi-threaded program and (b) pollute the top-N with thread names
+    // like "tokio-runtime-w" or "DelayedTaskSche". Skip them.
+    if proc_.thread_kind().is_some() {
+        return true;
+    }
+    cfg!(windows) && pid.as_u32() == 0
+}
+
+fn username_of(proc_: &sysinfo::Process, users: &Users) -> Option<String> {
+    proc_
+        .user_id()
+        .and_then(|uid| users.get_user_by_id(uid))
+        .map(|u| u.name().to_string())
+        .filter(|n| !n.is_empty())
 }
 
 #[cfg(target_os = "linux")]
@@ -30,7 +54,7 @@ fn read_pss_kb(pid: u32) -> Option<u64> {
     let raw = std::fs::read_to_string(format!("/proc/{pid}/smaps_rollup")).ok()?;
     for line in raw.lines() {
         if let Some(rest) = line.strip_prefix("Pss:") {
-            let val = rest.trim().split_whitespace().next()?;
+            let val = rest.split_whitespace().next()?;
             return val.parse::<u64>().ok();
         }
     }
@@ -46,9 +70,6 @@ static PSS_SUPPORTED: OnceLock<bool> = OnceLock::new();
 
 #[cfg(target_os = "linux")]
 fn detect_pss(sys: &System) -> bool {
-    if cfg!(not(target_os = "linux")) {
-        return false;
-    }
     let own_pid = std::process::id();
     // Sort foreign PIDs ascending so the probe sees the same first
     // candidate the Python collector does (psutil iterates /proc in
@@ -95,11 +116,7 @@ pub fn pss_supported(sys: &System) -> bool {
 }
 
 pub fn process_metric_label(sys: &System) -> &'static str {
-    if pss_supported(sys) {
-        "pss"
-    } else {
-        "rss"
-    }
+    if pss_supported(sys) { "pss" } else { "rss" }
 }
 
 /// PSS sum for a process group in MB, falling back per-pid to the
@@ -128,29 +145,17 @@ pub fn collect_top(sys: &System, users: &Users) -> Vec<Process> {
     let mut by_name: HashMap<String, Aggregated> = HashMap::new();
 
     for (pid, proc_) in sys.processes() {
-        // sysinfo lists every kernel task by default — including threads.
-        // psutil counts only main processes, so threads here would (a)
-        // double-count RSS for any multi-threaded program and (b) pollute
-        // the top-N with thread names like "tokio-runtime-w" or
-        // "DelayedTaskSche". Skip them.
-        if proc_.thread_kind().is_some() {
+        if skip_process(*pid, proc_) {
             continue;
         }
 
-        let pid_u: u32 = pid.as_u32();
         let name = display_name(proc_);
         let mem_mb = proc_.memory() as f64 / (1024.0 * 1024.0);
 
-        let username = proc_
-            .user_id()
-            .and_then(|uid| users.get_user_by_id(uid))
-            .map(|u| u.name().to_string())
-            .unwrap_or_default();
-
         let entry = by_name.entry(name).or_default();
         entry.mem_mb += mem_mb;
-        entry.pids.push(pid_u);
-        if !username.is_empty() {
+        entry.pids.push(pid.as_u32());
+        if let Some(username) = username_of(proc_, users) {
             entry.usernames.insert(username);
         }
     }
@@ -197,13 +202,11 @@ pub fn collect_top(sys: &System, users: &Users) -> Vec<Process> {
     final_entries
         .into_iter()
         .map(|(name, agg)| Process {
-            pid: agg.pids.first().copied().unwrap_or(0),
+            // Lowest pid in the group: usually the parent of a forking
+            // server, and stable from scan to scan (HashMap order isn't).
+            pid: agg.pids.iter().min().copied().unwrap_or(0),
             name,
-            username: agg
-                .usernames
-                .into_iter()
-                .collect::<Vec<_>>()
-                .join(", "),
+            username: agg.usernames.into_iter().collect::<Vec<_>>().join(", "),
             mem: round2(agg.mem_mb),
         })
         .collect()
@@ -229,7 +232,7 @@ pub fn refresh_kind() -> sysinfo::ProcessRefreshKind {
     // cmdline, etc. saves the per-process overhead sysinfo would
     // otherwise pay. CPU% needs two refreshes spaced in time to produce a
     // non-zero value; the sampler's 5-tick cadence provides that window.
-    sysinfo::ProcessRefreshKind::new()
+    sysinfo::ProcessRefreshKind::nothing()
         .with_memory()
         .with_cpu()
         .with_user(sysinfo::UpdateKind::OnlyIfNotSet)
@@ -246,7 +249,7 @@ pub fn collect_top_cpu(sys: &System, users: &Users) -> Vec<ProcessCpu> {
     let mut by_name: HashMap<String, AggregatedCpu> = HashMap::new();
 
     for (pid, proc_) in sys.processes() {
-        if proc_.thread_kind().is_some() {
+        if skip_process(*pid, proc_) {
             continue;
         }
 
@@ -254,21 +257,20 @@ pub fn collect_top_cpu(sys: &System, users: &Users) -> Vec<ProcessCpu> {
         let name = display_name(proc_);
         let cpu_pct = proc_.cpu_usage() as f64;
 
-        let username = proc_
-            .user_id()
-            .and_then(|uid| users.get_user_by_id(uid))
-            .map(|u| u.name().to_string())
-            .unwrap_or_default();
-
         let entry = by_name.entry(name).or_default();
         entry.cpu_pct += cpu_pct;
-        // Keep a single representative pid per name group — pick the
-        // highest-CPU one so clicking through to "details" lands on the
-        // process actually driving the load.
-        if entry.pid == 0 || cpu_pct > 0.0 {
+        // Keep a single representative pid per name group — the
+        // highest-CPU one, so clicking through to "details" lands on the
+        // process actually driving the load. (Ties keep the lower pid so
+        // an idle group doesn't flip between members from scan to scan.)
+        if entry.pid == 0
+            || cpu_pct > entry.pid_cpu
+            || (cpu_pct == entry.pid_cpu && pid_u < entry.pid)
+        {
             entry.pid = pid_u;
+            entry.pid_cpu = cpu_pct;
         }
-        if !username.is_empty() {
+        if let Some(username) = username_of(proc_, users) {
             entry.usernames.insert(username);
         }
     }
@@ -288,11 +290,7 @@ pub fn collect_top_cpu(sys: &System, users: &Users) -> Vec<ProcessCpu> {
         .map(|(name, agg)| ProcessCpu {
             pid: agg.pid,
             name,
-            username: agg
-                .usernames
-                .into_iter()
-                .collect::<Vec<_>>()
-                .join(", "),
+            username: agg.usernames.into_iter().collect::<Vec<_>>().join(", "),
             cpu: round2(agg.cpu_pct),
         })
         .collect()

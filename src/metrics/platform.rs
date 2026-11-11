@@ -6,18 +6,21 @@ use crate::snapshot::PlatformInfo;
 
 static USER: OnceLock<String> = OnceLock::new();
 static DISTRO: OnceLock<String> = OnceLock::new();
+static KERNEL: OnceLock<String> = OnceLock::new();
 
 pub fn user() -> String {
-    USER.get_or_init(|| whoami::username()).clone()
+    USER.get_or_init(|| whoami::username().unwrap_or_default())
+        .clone()
 }
 
 pub fn distro() -> String {
     DISTRO
         .get_or_init(|| {
-            // Linux: /etc/os-release PRETTY_NAME -> NAME -> "Linux".
-            // macOS / Windows: sysinfo's `name()` returns a usable label;
-            // append the OS version when we have one for parity with the
-            // Python output (e.g. "Ubuntu 24.04.1 LTS").
+            // Linux: /etc/os-release PRETTY_NAME -> NAME (e.g. "Ubuntu
+            // 24.04.1 LTS").
+            // macOS / Windows: sysinfo's ``long_os_version()`` gives the
+            // product name with its version ("Windows 11 Pro", "macOS
+            // 15.1 Sequoia"); plain ``name()`` is just "Windows".
             #[cfg(target_os = "linux")]
             if let Ok(raw) = std::fs::read_to_string("/etc/os-release") {
                 let mut pretty = None;
@@ -33,18 +36,24 @@ pub fn distro() -> String {
                     return s;
                 }
             }
-            System::name().unwrap_or_else(|| "unknown".to_string())
+            System::long_os_version()
+                .or_else(|_| System::name())
+                .unwrap_or_else(|_| "unknown".to_string())
         })
         .clone()
 }
 
 pub fn kernel() -> String {
-    System::kernel_version().unwrap_or_default()
+    // Fixed for the life of the process; cached so the per-tick sampler
+    // doesn't re-read /proc or the Windows registry every second. On
+    // Windows the "kernel version" is the OS build number (e.g. "26100").
+    KERNEL
+        .get_or_init(|| System::kernel_version().unwrap_or_default())
+        .clone()
 }
 
 pub fn uptime_string() -> String {
-    let secs = System::uptime();
-    format_uptime(secs)
+    format_uptime(System::uptime().unwrap_or(0))
 }
 
 fn format_uptime(total: u64) -> String {
@@ -88,5 +97,22 @@ pub fn collect() -> PlatformInfo {
         distro: distro(),
         kernel: kernel(),
         uptime,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_uptime;
+
+    #[test]
+    fn uptime_skips_zero_parts_and_pluralises() {
+        assert_eq!(format_uptime(0), "");
+        assert_eq!(format_uptime(1), "1 sec");
+        assert_eq!(format_uptime(61), "1 min, 1 sec");
+        assert_eq!(format_uptime(3_600), "1 hr");
+        assert_eq!(
+            format_uptime(2 * 86_400 + 2 * 3_600 + 120),
+            "2 days, 2 hrs, 2 mins"
+        );
     }
 }

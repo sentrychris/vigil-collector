@@ -2,13 +2,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use arc_swap::ArcSwap;
+use bytes::Bytes;
 use sysinfo::{
-    Components, CpuRefreshKind, Disks, MemoryRefreshKind, Networks, RefreshKind, System, Users,
+    CpuRefreshKind, DiskRefreshKind, Disks, MemoryRefreshKind, Networks, RefreshKind, System, Users,
 };
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
 use crate::metrics;
+use crate::metrics::cpu::Sensors;
 use crate::metrics::disk::DiskIoPrev;
 use crate::metrics::net::NetIoPrev;
 use crate::snapshot::{Process, ProcessCpu, Snapshot};
@@ -30,7 +32,7 @@ struct SamplerState {
     sys: System,
     disks: Disks,
     networks: Networks,
-    components: Components,
+    sensors: Sensors,
     users: Users,
     cores: u32,
     disk_io_prev: Option<DiskIoPrev>,
@@ -42,23 +44,25 @@ struct SamplerState {
 }
 
 impl SamplerState {
-    fn new() -> Self {
+    fn new() -> anyhow::Result<Self> {
         let sys = System::new_with_specifics(
-            RefreshKind::new()
+            RefreshKind::nothing()
                 .with_cpu(CpuRefreshKind::everything())
                 .with_memory(MemoryRefreshKind::everything())
                 .with_processes(metrics::process::refresh_kind()),
-        );
-        let disks = Disks::new_with_refreshed_list();
-        let networks = Networks::new_with_refreshed_list();
-        let components = Components::new_with_refreshed_list();
-        let users = Users::new_with_refreshed_list();
+        )?;
+        // Disks and networks are listed (not refreshed) here; the first
+        // ``refresh`` below does the real read.
+        let disks = Disks::new()?;
+        let networks = Networks::new()?;
+        let users = Users::new()?;
+        let sensors = Sensors::new();
         let cores = sys.cpus().len() as u32;
-        Self {
+        Ok(Self {
             sys,
             disks,
             networks,
-            components,
+            sensors,
             users,
             cores,
             disk_io_prev: None,
@@ -67,7 +71,7 @@ impl SamplerState {
             cached_processes: Vec::new(),
             cached_processes_metric: String::from("rss"),
             cached_processes_by_cpu: Vec::new(),
-        }
+        })
     }
 
     fn refresh(&mut self) -> Snapshot {
@@ -82,8 +86,10 @@ impl SamplerState {
         // tick as processes below.
         self.sys.refresh_cpu_usage();
         self.sys.refresh_memory();
-        self.networks.refresh();
-        self.components.refresh();
+        // ``true`` drops interfaces that went away; new ones (VPN up, USB
+        // NIC plugged in) are picked up by the same call.
+        self.networks.refresh(true);
+        self.sensors.refresh();
 
         // Slow, every-Nth-tick: process scan dominates the per-tick CPU
         // budget. Top-N by memory is stable across short windows, so
@@ -92,9 +98,9 @@ impl SamplerState {
         // CPU frequency is rolled into the same cadence — it's a display
         // value that doesn't need 1 Hz freshness and reading it
         // per-core-per-tick was ~2 ms by itself.
-        if self.tick == 0 || self.tick % PROCESS_SCAN_EVERY == 0 {
+        if self.tick.is_multiple_of(PROCESS_SCAN_EVERY) {
             self.sys.refresh_cpu_frequency();
-            self.users.refresh_list();
+            self.users.refresh();
             self.sys.refresh_processes_specifics(
                 sysinfo::ProcessesToUpdate::All,
                 true,
@@ -108,17 +114,19 @@ impl SamplerState {
         }
 
         // Slow, every-Mth-tick: re-scan the mount table to catch new
-        // mounts/unmounts. We never use sysinfo's stored disk usage
-        // (statvfs is called per-tick in ``usage_for_mount`` for psutil
-        // parity), so the costly per-mount statvfs that ``Disks::refresh``
-        // does on every tick is pure overhead and gets skipped.
-        if self.tick == 0 || self.tick % DISK_LIST_REFRESH_EVERY == 0 {
-            self.disks.refresh_list();
+        // mounts/unmounts. Per-disk usage is read per-tick by
+        // ``metrics::disk`` itself (statvfs / GetDiskFreeSpaceExW), so
+        // sysinfo's stored usage is only a fallback and its storage read
+        // rides along with the re-scan. Kind (SSD/HDD) and per-volume I/O
+        // aren't used and are skipped.
+        if self.tick.is_multiple_of(DISK_LIST_REFRESH_EVERY) {
+            self.disks
+                .refresh_specifics(true, DiskRefreshKind::nothing().with_storage());
         }
 
         self.tick = self.tick.wrapping_add(1);
 
-        let cpu = metrics::cpu::collect(&self.sys, &self.components, self.cores);
+        let cpu = metrics::cpu::collect(&self.sys, &self.sensors, self.cores);
         let mem = metrics::mem::collect(&self.sys);
         let disk_root = metrics::disk::collect_root(&self.disks);
         let all_disks = metrics::disk::collect_all(&self.disks);
@@ -149,39 +157,39 @@ impl SamplerState {
 }
 
 /// Triple-cached snapshot bytes — one per wire-format projection.
+///
+/// Stored as ``Bytes`` so handing a buffer to an HTTP body or a WebSocket
+/// frame is a refcount bump rather than a copy of the JSON.
 pub struct CachedJson {
-    pub http_system: Arc<ArcSwap<Vec<u8>>>,
-    pub ws_system: Arc<ArcSwap<Vec<u8>>>,
-    pub network: Arc<ArcSwap<Vec<u8>>>,
+    pub http_system: ArcSwap<Bytes>,
+    pub ws_system: ArcSwap<Bytes>,
+    pub network: ArcSwap<Bytes>,
 }
 
 impl CachedJson {
     fn new() -> Self {
         Self {
-            http_system: Arc::new(ArcSwap::from_pointee(b"{}".to_vec())),
-            ws_system: Arc::new(ArcSwap::from_pointee(b"{}".to_vec())),
-            network: Arc::new(ArcSwap::from_pointee(
-                br#"{"interfaces":[],"statistics":{}}"#.to_vec(),
+            http_system: ArcSwap::from_pointee(Bytes::from_static(b"{}")),
+            ws_system: ArcSwap::from_pointee(Bytes::from_static(b"{}")),
+            network: ArcSwap::from_pointee(Bytes::from_static(
+                br#"{"interfaces":[],"statistics":{}}"#,
             )),
         }
     }
 
     fn publish(&self, snap: &Snapshot) {
-        if let Ok(b) = serde_json::to_vec(&snap.http_view()) {
-            self.http_system.store(Arc::new(b));
-        }
-        if let Ok(b) = serde_json::to_vec(&snap.ws_view()) {
-            self.ws_system.store(Arc::new(b));
-        }
-        if let Ok(b) = serde_json::to_vec(&snap.network_view()) {
-            self.network.store(Arc::new(b));
-        }
+        let store = |slot: &ArcSwap<Bytes>, json: serde_json::Result<Vec<u8>>| match json {
+            Ok(b) => slot.store(Arc::new(Bytes::from(b))),
+            Err(e) => tracing::warn!("failed to serialize snapshot: {e}"),
+        };
+        store(&self.http_system, serde_json::to_vec(&snap.http_view()));
+        store(&self.ws_system, serde_json::to_vec(&snap.ws_view()));
+        store(&self.network, serde_json::to_vec(&snap.network_view()));
     }
 }
 
 pub struct Sampler {
     interval: Duration,
-    snapshot: Arc<ArcSwap<Snapshot>>,
     json: Arc<CachedJson>,
     stop: Arc<Notify>,
     handle: Option<JoinHandle<()>>,
@@ -192,7 +200,6 @@ impl Sampler {
         let interval = Duration::from_secs_f64(interval_secs.max(0.1));
         Self {
             interval,
-            snapshot: Arc::new(ArcSwap::from_pointee(Snapshot::default())),
             json: Arc::new(CachedJson::new()),
             stop: Arc::new(Notify::new()),
             handle: None,
@@ -203,42 +210,55 @@ impl Sampler {
         self.interval
     }
 
-    pub fn snapshot_handle_arc(&self) -> Arc<ArcSwap<Snapshot>> {
-        self.snapshot.clone()
-    }
-
     pub fn json(&self) -> Arc<CachedJson> {
         self.json.clone()
     }
 
-    pub fn start(&mut self) {
+    /// Start the sampling loop. Fails only if sysinfo can't initialise at
+    /// all on this platform, which leaves nothing to serve.
+    pub fn start(&mut self) -> anyhow::Result<()> {
         if self.handle.is_some() {
-            return;
+            return Ok(());
         }
 
         let interval = self.interval;
-        let snap_slot = self.snapshot.clone();
         let json = self.json.clone();
         let stop = self.stop.clone();
 
         // Seed once synchronously so the first connecting client doesn't
         // see zeros for up to ``interval`` seconds.
-        let mut state = Box::new(SamplerState::new());
-        let initial = state.refresh();
-        json.publish(&initial);
-        snap_slot.store(Arc::new(initial));
+        let mut state = Box::new(SamplerState::new()?);
+        json.publish(&state.refresh());
 
         let handle = tokio::spawn(async move {
+            // ``interval`` rather than ``sleep`` keeps a steady cadence:
+            // the tick's own refresh time no longer adds to the period.
+            // ``Delay`` means a stalled tick (machine suspended, heavy load)
+            // resumes the cadence instead of firing a burst to catch up.
+            let mut ticker = tokio::time::interval(interval);
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            ticker.tick().await; // the first tick completes immediately
+
             let mut state = Some(state);
             loop {
                 tokio::select! {
                     _ = stop.notified() => break,
-                    _ = tokio::time::sleep(interval) => {}
+                    _ = ticker.tick() => {}
                 }
+                let owned = match state.take() {
+                    Some(s) => s,
+                    // The previous rebuild failed; try again this tick.
+                    None => match SamplerState::new() {
+                        Ok(s) => Box::new(s),
+                        Err(e) => {
+                            tracing::warn!("sampler state rebuild failed: {e}");
+                            continue;
+                        }
+                    },
+                };
                 // Heavy refresh runs on the blocking pool — sysinfo touches
-                // /proc and other syscalls and we don't want a runtime
-                // worker stalled for 5-10ms each tick.
-                let owned = state.take().expect("sampler state always restored");
+                // /proc (or the Win32 process/perf APIs) and we don't want
+                // the runtime thread stalled for 5-10ms each tick.
                 let join = tokio::task::spawn_blocking(move || {
                     let mut s = owned;
                     let snap = s.refresh();
@@ -249,20 +269,19 @@ impl Sampler {
                     Ok((snapshot, returned)) => {
                         state = Some(returned);
                         json.publish(&snapshot);
-                        snap_slot.store(Arc::new(snapshot));
                     }
                     Err(e) => {
                         // The sampler must never die on a transient error;
-                        // rebuild fresh state and keep ticking. Previous
-                        // snapshot stays in place until the next tick.
-                        tracing::warn!("sampler tick failed, rebuilding state: {}", e);
-                        state = Some(Box::new(SamplerState::new()));
+                        // the state is rebuilt on the next tick. Previous
+                        // snapshot stays in place until then.
+                        tracing::warn!("sampler tick failed, rebuilding state: {e}");
                     }
                 }
             }
         });
 
         self.handle = Some(handle);
+        Ok(())
     }
 
     pub fn stop(&mut self) {

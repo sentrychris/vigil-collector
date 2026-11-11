@@ -10,10 +10,22 @@ See it powering a real dashboard [here](https://status.edcs.app), paired with
 
 ## Quick start
 
+Runs on Linux, Windows and macOS. Requires Rust 1.95 or newer
+(`rustup update`).
+
 ```sh
 git clone https://github.com/sentrychris/vigil-collector && cd vigil-collector
 cargo build --release
 ./target/release/vigil-collector
+```
+
+On Windows (PowerShell), with the MSVC toolchain that `rustup` installs by
+default:
+
+```powershell
+git clone https://github.com/sentrychris/vigil-collector; cd vigil-collector
+cargo build --release
+.\target\release\vigil-collector.exe
 ```
 
 Defaults to `localhost:4500`. Hit `http://localhost:4500/system` to confirm
@@ -24,16 +36,23 @@ it's running.
 ./target/release/vigil-collector --address 0.0.0.0 --port 4500
 ```
 
-`Ctrl-C` (or `SIGTERM`) shuts everything down cleanly. A settings file is
-created on first run at `~/.vigil-collector/settings.json` - see
+`Ctrl-C` (or `SIGTERM`; on Windows also Ctrl-Break, closing the console,
+logoff and shutdown) shuts everything down cleanly, sending connected
+WebSocket clients a `1001 Going Away` close. A settings file is created on
+first run at `~/.vigil-collector/settings.json`
+(`%USERPROFILE%\.vigil-collector\settings.json` on Windows) - see
 [Configuration](#configuration).
+
+Listening on `0.0.0.0` on Windows triggers a Windows Defender Firewall
+prompt the first time; allow it on private networks for other machines to
+reach the collector.
 
 ## What you get
 
 - **Live stream** of CPU, memory, disk, disk I/O, network throughput, and top
   processes - one snapshot per second by default.
-- **Multi-disk** for every mounted partition, with reserved-block accounting
-  that matches `df` exactly.
+- **Multi-disk** for every mounted partition (every fixed/removable drive on
+  Windows), with reserved-block accounting that matches `df` exactly.
 - **External health checks** using a configurable list of URLs. Hits `/probes`
   to get reachability + latency.
 - **Process accounting** in PSS when readable, RSS otherwise (the payload
@@ -66,8 +85,10 @@ Current snapshot of the host. Same payload that the WebSocket pushes.
 | Field | Type | Description |
 |---|---|---|
 | `cpu.usage` | number | CPU utilization, % |
-| `cpu.temp` | number | Package temperature, °C (`0` if no sensor) |
+| `cpu.temp` | number | Package temperature, °C (`0` if no sensor; always `0` on Windows) |
 | `cpu.freq` | number | Current frequency, MHz |
+| `cpu.cores` | number | Logical core count |
+| `cpu.load` | array / null | 1/5/15-minute load average (`null` on Windows) |
 | `mem.total` / `used` / `free` | number | RAM, GiB. `used + free == total` |
 | `mem.percent` | number | RAM utilization, % |
 | `disk.total` / `used` / `free` | number | Primary partition (root or system drive), GiB |
@@ -78,7 +99,8 @@ Current snapshot of the host. Same payload that the WebSocket pushes.
 | `network.rx_bytes_per_sec` | number | Receive throughput (loopback excluded) |
 | `network.tx_bytes_per_sec` | number | Transmit throughput |
 | `processes[]` | array | Top 10 by memory, aggregated by process name |
-| `processes_metric` | string | `"pss"` or `"rss"` - tells the UI which accounting was used |
+| `processes_metric` | string | `"pss"` or `"rss"` - tells the UI which accounting was used (`"rss"` = working set on Windows) |
+| `processes_by_cpu[]` | array | Top 10 by CPU %, aggregated by process name |
 | `platform.distro` / `kernel` / `uptime` | string | OS info + human-readable uptime |
 | `user` | string | Logged-in user |
 
@@ -96,7 +118,7 @@ Per-interface counters under `statistics.<iface>`:
 | `mb_sent` / `mb_received` | number | Bytes since boot, divided by 1024² |
 | `pk_sent` / `pk_received` | number | Packet counts |
 | `error_in` / `error_out` | number | Error counts |
-| `dropin` / `dropout` | number | Dropped packet counts |
+| `dropin` / `dropout` | number | Dropped packet counts (Linux only; `0` elsewhere) |
 
 ### `GET /probes`
 
@@ -140,9 +162,48 @@ run; all keys are optional.
 | `logging_enabled` | `true` | Toggle file logging |
 | `log_level` | `"INFO"` | `DEBUG` / `INFO` / `WARNING` / `ERROR` |
 
-CLI flags (`--address`, `--port`, `--hub`, `--hub-key`, `--hub-name`,
-`--hub-tags`) and the matching `VIGIL_COLLECTOR_*` environment variables
-override the file at startup.
+CLI flags (`--address`, `--port`) override the file at startup. `RUST_LOG`
+overrides `log_level`, and `NO_COLOR` turns off coloured console output.
+The file may be saved with a UTF-8 byte-order mark (as Notepad does).
+
+## Platform notes
+
+| Metric | Linux | Windows | macOS |
+|---|---|---|---|
+| Disk usage | `statvfs`, `df`-exact | `GetDiskFreeSpaceExW` | `statvfs` |
+| Disk I/O + IOPS | `/proc/diskstats` | `IOCTL_DISK_PERFORMANCE` per physical drive | not reported (`0`) |
+| CPU temperature | hwmon / thermal zones | not reported (`0`) | SMC sensors |
+| Load average | yes | `null` | yes |
+| Process memory | PSS when readable, else RSS | working set | RSS |
+| Dropped packets | yes | `0` | `0` |
+
+Nothing needs admin/root on any platform. Running as root on Linux lets the
+collector read PSS for every process instead of only your own.
+
+## Running in the background
+
+**Linux (systemd):** see [systemd/vigil-collector.service](systemd/vigil-collector.service).
+Copy the binary to `/usr/local/bin`, fill in `User`/`Group`, then
+`sudo systemctl enable --now vigil-collector`.
+
+**Windows:** the collector is a console program, not a Windows service.
+To start it automatically in the background, register a scheduled task
+from an elevated PowerShell. Running it as `SYSTEM` starts it at boot with
+no console window:
+
+```powershell
+$exe = "C:\Program Files\Vigil\vigil-collector.exe"   # wherever you put it
+$action = New-ScheduledTaskAction -Execute $exe -Argument "--address 0.0.0.0 --port 4500"
+$trigger = New-ScheduledTaskTrigger -AtStartup
+$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) `
+    -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
+Register-ScheduledTask -TaskName "Vigil Collector" -Action $action -Trigger $trigger `
+    -Settings $settings -User "SYSTEM" -RunLevel Highest
+```
+
+As `SYSTEM`, its home folder is `C:\Windows\System32\config\systemprofile`,
+so that's where `.vigil-collector\settings.json` and the logs go.
+
 
 ## Connecting from your own app
 
@@ -155,43 +216,27 @@ const worker = await fetch("http://localhost:4500/worker", { method: "POST" })
 const ws = new WebSocket(`ws://localhost:4500/connect?id=${worker.id}`);
 ws.onmessage = (event) => {
   const snapshot = JSON.parse(event.data);
-  // { cpu, mem, disk, disk_io, network, uptime, processes, processes_metric }
+  // { cpu, mem, disk, disk_io, network, uptime, processes, processes_metric, processes_by_cpu }
 };
 ```
 
 Each worker is single-use and expires in 5 seconds if unclaimed. Closing the
-WebSocket frees it.
-
-## Vigil Pro hub push (optional)
-
-```sh
-vigil-collector \
-  --hub wss://hub.example.com/ingest \
-  --hub-key <api_key> \
-  --hub-name web-01 \
-  --hub-tags prod,web
-```
-
-The collector opens an outbound WebSocket to the hub, sends a `hello` frame,
-and pushes `samples` / `processes` frames at the hub-suggested cadence.
-Disconnects are absorbed by exponential backoff (1 s → 30 s, ×1.7); the local
-HTTP/WS server is unaffected. The wire format is the v1 protocol - flat
-`metric|dim` keys (`disk.used_bytes|/var`, `net.rx_bytes_per_s|eth0`),
-25-row top-N process frame with PSS/RSS label, snap-loop and Docker mounts
-skipped.
+WebSocket frees it. A connect refused with `503` (server at
+`max_ws_connections`) doesn't use up the worker id.
 
 ## Architecture
 
 A single tokio task ticks every `ws_push_interval` seconds, runs the metric
-collection on the blocking pool (so sysinfo's `/proc` reads don't tie up a
-runtime worker), and publishes the snapshot via `arc_swap::ArcSwap`. HTTP and
+collection on the blocking pool (so sysinfo's `/proc` reads, or Win32 calls
+on Windows, don't tie up a runtime worker), and publishes the snapshot via
+`arc_swap::ArcSwap`. HTTP and
 WebSocket handlers project from that snapshot - they never touch sysinfo
 themselves.
 
 Three serialized JSON buffers are cached per tick (HTTP `/system`, WS frame,
 `/network`). At `max_ws_connections = 20`, the WS push path is a single
 atomic load + `socket.send()` per client per tick, no per-client
-serialization.
+serialization or copying.
 
 ### Runtime layout
 
@@ -207,10 +252,11 @@ The memory and CPU footprints come from three deliberate choices:
   scanning across a global thread pool sized to `num_cpus`. For a 1 Hz tick
   scanning a few hundred processes that's wasted: rayon's idle pool was the
   source of ~16 background threads in early builds.
-- **Cached `Arc<Vec<u8>>` per endpoint** - one allocation per sampler tick
-  for each of `/system`, the WS frame, and `/network`. Old buffers are freed
-  as readers release their `Arc` clones, so steady-state heap is bounded by
-  one tick's worth of buffers regardless of concurrent client count.
+- **Cached `Bytes` per endpoint** - one allocation per sampler tick for each
+  of `/system`, the WS frame, and `/network`, shared by refcount with every
+  reader. Old buffers are freed as readers release their clones, so
+  steady-state heap is bounded by one tick's worth of buffers regardless of
+  concurrent client count.
 
 We tried `mimalloc` as the global allocator: it raised throughput slightly
 (+5%) but increased steady-state RSS by ~1 MB and reserved a 1 GB virtual
@@ -271,9 +317,11 @@ doesn't scale with client count.
 cargo build --release
 ```
 
-`target/release/vigil-collector` is a self-contained executable - the
-dashboard HTML, favicon, and every runtime dependency are baked in. Stripped
-binary is ~5.5 MB.
+`target/release/vigil-collector` (`vigil-collector.exe` on Windows) is a
+self-contained executable - the dashboard HTML, favicon, and every runtime
+dependency are baked in. TLS for `/probes` uses rustls with the ring
+provider and the OS certificate store, so there is no OpenSSL dependency
+and no CMake/NASM needed to build on Windows. Stripped binary is ~5 MB.
 
 For a fully static binary on Linux:
 

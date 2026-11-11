@@ -1,6 +1,5 @@
 mod cli;
 mod config;
-mod hub;
 mod log;
 mod metrics;
 mod sampler;
@@ -17,7 +16,7 @@ use crate::cli::Cli;
 use crate::sampler::Sampler;
 
 fn resolve_addr(host: &str, port: u16) -> anyhow::Result<SocketAddr> {
-    if host == "localhost" {
+    if host.eq_ignore_ascii_case("localhost") {
         return Ok(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port));
     }
     if let Ok(ip) = host.parse::<IpAddr>() {
@@ -36,57 +35,39 @@ fn resolve_addr(host: &str, port: u16) -> anyhow::Result<SocketAddr> {
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
     let args = Cli::parse();
-    let settings = config::read_settings();
 
-    log::init(&settings.log_level, settings.logging_enabled)?;
+    // Settings are read before logging exists, so anything worth reporting
+    // about the settings file comes back as notes and is logged right after
+    // the subscriber is installed.
+    let (settings, notes) = config::load_settings();
+    log::init(&settings.log_level, settings.logging_enabled);
+    for note in notes {
+        note.emit();
+    }
 
-    let address = if args.address.is_empty() {
-        settings.address.clone()
-    } else {
-        args.address.clone()
-    };
+    // reqwest is built without a bundled crypto provider (see Cargo.toml);
+    // install ring as the process-wide default before any client exists.
+    let _ = rustls::crypto::ring::default_provider().install_default();
 
-    let port = if args.port == 0 {
-        settings.port_number
-    } else {
-        args.port
-    };
-
+    let address = args
+        .address
+        .clone()
+        .unwrap_or_else(|| settings.address.clone());
+    let port = args.port.unwrap_or(settings.port_number);
     let addr = resolve_addr(&address, port)?;
 
     let mut sampler = Sampler::new(settings.ws_push_interval);
-    sampler.start();
-
-    let mut hub_client = match (args.hub.clone(), args.hub_key.clone()) {
-        (Some(url), Some(key)) if !url.is_empty() && !key.is_empty() => {
-            let mut hc = hub::HubClient::new(
-                url.clone(),
-                key,
-                args.hub_name.clone(),
-                args.parse_tags(),
-                sampler.snapshot_handle_arc(),
-                sampler.interval(),
-            );
-            hc.start();
-            tracing::info!("Pushing to Vigil Pro hub at {}", url);
-            Some(hc)
-        }
-        (Some(_), None) | (None, Some(_)) => {
-            tracing::warn!(
-                "Hub config incomplete — both --hub and --hub-key (or env vars) are required. Hub push disabled."
-            );
-            None
-        }
-        _ => None,
-    };
+    sampler.start()?;
 
     // Single shutdown notify shared between signal watcher and server.
+    // ``notify_one`` stores a permit, so a signal that lands before the
+    // server starts awaiting is not lost.
     let shutdown = Arc::new(Notify::new());
     let shutdown_for_signal = shutdown.clone();
     tokio::spawn(async move {
         wait_for_signal().await;
         tracing::info!("Shutting down gracefully...");
-        shutdown_for_signal.notify_waiters();
+        shutdown_for_signal.notify_one();
     });
 
     let server_shutdown = shutdown.clone();
@@ -95,35 +76,84 @@ async fn main() -> anyhow::Result<()> {
     })
     .await;
 
-    if let Some(hc) = hub_client.as_mut() {
-        hc.stop();
-    }
     sampler.stop();
 
     serve_result
 }
 
+#[cfg(unix)]
 async fn wait_for_signal() {
-    let ctrl_c = async {
-        let _ = tokio::signal::ctrl_c().await;
-    };
+    use tokio::signal::unix::{SignalKind, signal};
 
-    #[cfg(unix)]
     let terminate = async {
-        if let Ok(mut sig) =
-            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-        {
-            sig.recv().await;
-        } else {
-            std::future::pending::<()>().await;
+        match signal(SignalKind::terminate()) {
+            Ok(mut sig) => {
+                sig.recv().await;
+            }
+            Err(_) => std::future::pending::<()>().await,
         }
     };
 
-    #[cfg(not(unix))]
-    let terminate = std::future::pending::<()>();
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {}
+        _ = terminate => {}
+    }
+}
+
+/// Windows has no SIGTERM. Ctrl-C and Ctrl-Break come from the console;
+/// closing the console window, logging off and shutting down arrive as
+/// their own control events and give the process a few seconds to exit,
+/// so listen for all of them.
+#[cfg(windows)]
+async fn wait_for_signal() {
+    use tokio::signal::windows;
+
+    macro_rules! on {
+        ($listener:expr) => {
+            async {
+                match $listener {
+                    Ok(mut s) => {
+                        s.recv().await;
+                    }
+                    Err(_) => std::future::pending::<()>().await,
+                }
+            }
+        };
+    }
 
     tokio::select! {
-        _ = ctrl_c => {}
-        _ = terminate => {}
+        _ = on!(windows::ctrl_c()) => {}
+        _ = on!(windows::ctrl_break()) => {}
+        _ = on!(windows::ctrl_close()) => {}
+        _ = on!(windows::ctrl_logoff()) => {}
+        _ = on!(windows::ctrl_shutdown()) => {}
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+async fn wait_for_signal() {
+    let _ = tokio::signal::ctrl_c().await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_addr;
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+    #[test]
+    fn resolves_localhost_and_literals() {
+        assert_eq!(
+            resolve_addr("localhost", 1).unwrap().ip(),
+            IpAddr::V4(Ipv4Addr::LOCALHOST)
+        );
+        assert_eq!(
+            resolve_addr("LOCALHOST", 1).unwrap().ip(),
+            IpAddr::V4(Ipv4Addr::LOCALHOST)
+        );
+        assert_eq!(resolve_addr("0.0.0.0", 4500).unwrap().port(), 4500);
+        assert_eq!(
+            resolve_addr("::1", 1).unwrap().ip(),
+            IpAddr::V6(Ipv6Addr::LOCALHOST)
+        );
     }
 }

@@ -5,9 +5,12 @@ pub mod ws;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 
-use axum::routing::{get, post};
 use axum::Router;
+use axum::routing::{get, post};
+use tokio::sync::watch;
 use tower_http::cors::{Any, CorsLayer};
 
 use crate::sampler::Sampler;
@@ -21,8 +24,16 @@ pub struct AppState {
     pub max_ws_connections: usize,
     pub push_interval: std::time::Duration,
     pub probes_client: reqwest::Client,
-    pub active_ws: Arc<std::sync::atomic::AtomicUsize>,
+    pub active_ws: Arc<AtomicUsize>,
+    /// Flips to ``true`` when the server starts shutting down, so open
+    /// WebSocket sessions can send a Close frame instead of being dropped.
+    pub closing: watch::Receiver<bool>,
 }
+
+/// How long shutdown waits for WebSocket sessions to send their Close
+/// frames. Windows gives a console process ~5 s after a close/logoff/
+/// shutdown event before killing it, so stay well inside that.
+const WS_DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
 
 pub fn router(state: AppState) -> Router {
     let cors = CorsLayer::new()
@@ -33,7 +44,10 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/", get(http::serve_index))
         .route("/favicon.ico", get(http::serve_favicon))
-        .route("/worker", post(http::create_worker).options(http::preflight))
+        .route(
+            "/worker",
+            post(http::create_worker).options(http::preflight),
+        )
         .route("/system", get(http::system).options(http::preflight))
         .route("/network", get(http::network).options(http::preflight))
         .route("/probes", get(http::probes).options(http::preflight))
@@ -52,10 +66,15 @@ where
     F: std::future::Future<Output = ()> + Send + 'static,
 {
     let workers = Arc::new(WorkerRegistry::new());
+    // One pooled client for the life of the server. The timeout is set per
+    // request by ``probes::run`` (re-read from settings each call), which
+    // overrides any client-level timeout in reqwest.
     let probes_client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs_f64(settings.probe_timeout))
         .redirect(reqwest::redirect::Policy::limited(10))
         .build()?;
+
+    let (closing_tx, closing) = watch::channel(false);
+    let active_ws = Arc::new(AtomicUsize::new(0));
 
     let state = AppState {
         sampler_json: sampler.json(),
@@ -63,14 +82,33 @@ where
         max_ws_connections: settings.max_ws_connections,
         push_interval: sampler.interval(),
         probes_client,
-        active_ws: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        active_ws: active_ws.clone(),
+        closing,
     };
 
     let app = router(state);
-    let listener = tokio::net::TcpListener::bind(addr).await?;
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .map_err(|e| anyhow::anyhow!("could not listen on {addr}: {e}"))?;
     tracing::info!("Listening on http://{}", addr);
     axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown)
+        .with_graceful_shutdown(async move {
+            shutdown.await;
+            let _ = closing_tx.send(true);
+        })
         .await?;
+
+    // Upgraded WebSocket connections aren't tracked by axum's graceful
+    // shutdown. Give them a moment to send Close (1001 Going Away) so
+    // dashboards see a clean disconnect rather than an abnormal one.
+    let drained = tokio::time::timeout(WS_DRAIN_TIMEOUT, async {
+        while active_ws.load(Ordering::Acquire) > 0 {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await;
+    if drained.is_err() {
+        tracing::debug!("shutdown: WebSocket sessions did not close in time");
+    }
     Ok(())
 }

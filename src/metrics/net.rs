@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::ffi::OsStr;
 use std::time::Instant;
 
 use sysinfo::Networks;
@@ -12,6 +13,18 @@ pub struct NetIoPrev {
     pub sent: u64,
 }
 
+/// Loopback by name (``lo`` on Linux, ``lo0`` on macOS/BSD), or by every
+/// address on it being a loopback address, which also catches renamed or
+/// aliased loopbacks. Windows never reaches this with its loopback: sysinfo
+/// drops interfaces without a hardware address there.
+fn is_loopback(name: &OsStr, data: &sysinfo::NetworkData) -> bool {
+    if name == "lo" || name == "lo0" {
+        return true;
+    }
+    let ips = data.ip_networks();
+    !ips.is_empty() && ips.iter().all(|n| n.addr.is_loopback())
+}
+
 /// Aggregate rx/tx bytes/sec, derived from the delta of total bytes
 /// received/sent across all interfaces (loopback excluded). The first
 /// call (no previous reading) returns zeros.
@@ -19,14 +32,18 @@ pub fn collect_throughput(networks: &Networks, prev: &mut Option<NetIoPrev>) -> 
     let mut recv = 0u64;
     let mut sent = 0u64;
     for (name, data) in networks.iter() {
-        if name == "lo" {
+        if is_loopback(name, data) {
             continue;
         }
         recv = recv.saturating_add(data.total_received());
         sent = sent.saturating_add(data.total_transmitted());
     }
     let now = Instant::now();
-    let last = prev.replace(NetIoPrev { at: now, recv, sent });
+    let last = prev.replace(NetIoPrev {
+        at: now,
+        recv,
+        sent,
+    });
     let Some(last) = last else {
         return Throughput::default();
     };
@@ -40,8 +57,15 @@ pub fn collect_throughput(networks: &Networks, prev: &mut Option<NetIoPrev>) -> 
     }
 }
 
+/// Interface names, sorted so ``/network`` lists them in a stable order
+/// (sysinfo stores them in a HashMap) that matches ``statistics``.
 pub fn interface_names(networks: &Networks) -> Vec<String> {
-    networks.iter().map(|(name, _)| name.clone()).collect()
+    let mut names: Vec<String> = networks
+        .keys()
+        .map(|name| name.to_string_lossy().into_owned())
+        .collect();
+    names.sort_unstable();
+    names
 }
 
 pub fn statistics(networks: &Networks) -> BTreeMap<String, NetIfaceStats> {
@@ -56,11 +80,12 @@ pub fn statistics(networks: &Networks) -> BTreeMap<String, NetIfaceStats> {
             error_out: d.total_errors_on_transmitted(),
             // sysinfo doesn't expose dropped-packet counters; psutil reads
             // them from /proc/net/dev. Backfill from there on Linux,
-            // otherwise report 0.
+            // otherwise report 0. (Windows has InDiscards/OutDiscards in
+            // MIB_IF_ROW2, but sysinfo doesn't surface them either.)
             dropin: 0,
             dropout: 0,
         };
-        out.insert(name.clone(), stats);
+        out.insert(name.to_string_lossy().into_owned(), stats);
     }
     #[cfg(target_os = "linux")]
     {

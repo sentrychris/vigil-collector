@@ -195,3 +195,29 @@ impl Snapshot {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Cpu;
+
+    #[test]
+    fn missing_temperature_serializes_as_integer_zero() {
+        let cpu = Cpu::default();
+        let json = serde_json::to_value(&cpu).unwrap();
+        assert_eq!(json["temp"], serde_json::json!(0));
+        assert!(json["temp"].is_u64());
+        assert!(json["load"].is_null());
+    }
+
+    #[test]
+    fn real_temperature_serializes_as_float() {
+        let cpu = Cpu {
+            temp: 41.5,
+            ..Cpu::default()
+        };
+        assert_eq!(
+            serde_json::to_value(&cpu).unwrap()["temp"],
+            serde_json::json!(41.5)
+        );
+    }
+}
