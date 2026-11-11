@@ -27,23 +27,8 @@ export interface ServicesConfiguration {
   };
 }
 
-export interface HubConfiguration {
-  /** Base URL of a Vigil Pro hub. Falsy ⇒ collector-only build. */
-  url: string;
-  /** Sample → chart polling cadence (ms). */
-  pollInterval: number;
-  /** Alert-state polling cadence (ms). */
-  alertPollInterval: number;
-}
-
-export interface PinsConfiguration {
-  inlineLimit: number;
-}
-
 export interface Configuration {
   app: BaseConfiguration;
   api: ApiConfiguration;
   services: ServicesConfiguration;
-  hub: HubConfiguration;
-  pins: PinsConfiguration;
 }

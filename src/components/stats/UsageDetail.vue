@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { UsageInformation } from "@/interfaces/SystemInformation";
+import { formatSize } from "@/utilities/format-size";
 
 defineProps<{
   detail: UsageInformation;
@@ -27,11 +28,11 @@ defineProps<{
   <div class="metric-rows">
     <div class="metric-row">
       <span class="row-label">FREE</span>
-      <span class="row-value mono">{{ detail.free }} <span class="row-unit">GiB</span></span>
+      <span class="row-value mono">{{ formatSize(detail.free).value }} <span class="row-unit">{{ formatSize(detail.free).unit }}</span></span>
     </div>
     <div class="metric-row">
       <span class="row-label">TOTAL</span>
-      <span class="row-value mono">{{ detail.total }} <span class="row-unit">GiB</span></span>
+      <span class="row-value mono">{{ formatSize(detail.total).value }} <span class="row-unit">{{ formatSize(detail.total).unit }}</span></span>
     </div>
   </div>
 </template>

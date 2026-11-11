@@ -46,11 +46,11 @@ describe("DataTable", () => {
       "634",
       "root",
       "Xorg",
-      "71.37",
+      "71.37 MiB",
       "1493",
       "pi",
       "node",
-      "63.8",
+      "63.80 MiB",
     ]);
 
     expect(cells[0].classes()).toContain("mono");

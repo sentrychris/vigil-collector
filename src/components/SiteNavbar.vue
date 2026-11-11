@@ -1,31 +1,13 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { RouterLink, useRoute } from "vue-router";
 import { config } from "@/config";
 import { useThemeStore } from "@/stores/theme";
 import { useSystemStore } from "@/stores/system";
-import { useHubStore } from "@/stores/hub";
-import HostStatusChip from "@/components/hub/HostStatusChip.vue";
-import PinnedHostsBar from "@/components/hub/PinnedHostsBar.vue";
 import PageHeader from "@/components/PageHeader.vue";
 import SiteLogo from "@/components/SiteLogo.vue";
 
 const theme = useThemeStore();
 const system = useSystemStore();
-const hub = useHubStore();
-const route = useRoute();
-const isHubRoute = computed(() => route.path.startsWith("/hub"));
-
-// Surface the current host as a breadcrumb chip when we're on a host
-// detail route — gives the navbar a "you are here" indicator beyond
-// just the Hub segment being lit.
-const hostCrumb = computed(() => {
-  if (route.name !== "hub-host") return null;
-  const id = Number(route.params.id);
-  const host = hub.hosts.find((h) => h.id === id);
-  return host ? { id, name: host.name, status: host.status } : { id, name: `#${id}`, status: null };
-});
-
 const node = computed(() => {
   const region = config.app.deployment.region;
   const instance = config.app.deployment.instance;
@@ -57,72 +39,11 @@ const node = computed(() => {
         <span class="navbar-toggler-icon"></span>
       </button>
       <div class="collapse navbar-collapse" id="navbarSupportedContent">
-        <div v-if="hub.isConfigured" class="nav-segments" role="tablist" aria-label="View mode">
-          <RouterLink
-            to="/"
-            class="seg"
-            active-class="is-active"
-            exact-active-class="is-active"
-          >
-            <font-awesome-icon icon="fa-solid fa-server" class="seg-icon" />
-            <span>Host</span>
-          </RouterLink>
-          <span class="seg-divider" aria-hidden="true"></span>
-          <RouterLink
-            to="/hub"
-            class="seg seg--hub"
-            active-class="is-active"
-          >
-            <font-awesome-icon icon="fa-solid fa-globe-europe" class="seg-icon" />
-            <span>Hub</span>
-            <span class="seg-pro" aria-label="Vigil Pro">Pro</span>
-            <span v-if="hub.firingAlerts.length" class="route-badge">
-              {{ hub.firingAlerts.length }}
-            </span>
-          </RouterLink>
-        </div>
-
-        <!-- Docs link — same chrome as the Host/Hub segment group (own
-             bordered shell, .seg styling on the link), but a separate
-             shell so it doesn't read as a third member of the view-mode
-             toggle. Active on any /hub/help/* path. -->
-        <div v-if="hub.isConfigured" class="nav-segments nav-segments--solo">
-          <RouterLink
-            to="/hub/help"
-            class="seg"
-            active-class="is-active"
-          >
-            <font-awesome-icon icon="fa-solid fa-circle-question" class="seg-icon" />
-            <span>Docs</span>
-          </RouterLink>
-        </div>
-
-        <!-- Pinned-host shortcuts. Self-contained — its own store, its
-             own visibility logic; renders nothing if there are no
-             resolvable pins, so the navbar stays calm for users who
-             haven't pinned anything. -->
-        <PinnedHostsBar v-if="hub.isConfigured" />
-
-        <!-- Host-detail breadcrumb. Shows when we're on /hub/hosts/:id —
-             clicking the chevron returns to the fleet, the chip itself
-             is a static "you are here" indicator. -->
-        <div v-if="hostCrumb" class="nav-crumb" aria-label="Current host">
-          <RouterLink to="/hub" class="crumb-back" title="Back to fleet">
-            <font-awesome-icon icon="fa-solid fa-chevron-right" class="crumb-chev" />
-          </RouterLink>
-          <HostStatusChip
-            :name="hostCrumb.name"
-            :status="hostCrumb.status"
-            :active="true"
-          />
-        </div>
-
         <ul class="navbar-nav me-auto mb-0"></ul>
 
         <div class="nav-controls">
-          <!-- Status indicator (collector mode) -->
+          <!-- Status indicator -->
           <span
-            v-if="!isHubRoute"
             class="status-chip"
             :class="`status-${system.connectionType}`"
           >
@@ -132,37 +53,11 @@ const node = computed(() => {
             }}</span>
           </span>
 
-          <!-- Hub status chip -->
-          <span
-            v-else-if="hub.ready"
-            class="status-chip status-websocket"
-            :title="`Hub: ${config.hub.url}`"
-          >
-            <span class="status-dot"></span>
-            <span class="status-text">HUB · {{ hub.hosts.length }}</span>
-          </span>
-          <span v-else-if="hub.isConfigured" class="status-chip status-http">
-            <span class="status-dot"></span>
-            <span class="status-text">NO TOKEN</span>
-          </span>
-
           <!-- Node identifier -->
           <span v-if="node" class="node-chip" :title="node">
             <font-awesome-icon icon="fa-solid fa-server" class="node-icon" />
             <span class="node-text">{{ node }}</span>
           </span>
-
-          <!-- Hub disconnect (only in hub mode + connected) -->
-          <button
-            v-if="isHubRoute && hub.ready"
-            class="hub-disconnect"
-            type="button"
-            title="Disconnect from hub"
-            aria-label="Disconnect from hub"
-            @click="hub.disconnect()"
-          >
-            <font-awesome-icon icon="fa-solid fa-power-off" />
-          </button>
 
           <span class="control-divider" aria-hidden="true"></span>
 
@@ -190,9 +85,8 @@ const node = computed(() => {
             </span>
           </label>
 
-          <!-- Connection mode toggle (collector view only) -->
+          <!-- Connection mode toggle -->
           <label
-            v-if="!isHubRoute"
             class="nav-toggle"
             title="Toggle live websocket"
             aria-label="Toggle live websocket"
@@ -385,200 +279,6 @@ const node = computed(() => {
 @keyframes live-pulse {
   0%, 100% { opacity: 1; }
   50%      { opacity: 0.4; }
-}
-
-/* ---------- Nav route links (Host / Hub) ---------- */
-.navbar-nav { display: inline-flex; align-items: center; gap: 0.4rem; padding-left: 0.6rem; }
-.nav-item   { list-style: none; }
-/* Primary view-mode switcher — segmented control (instrument-cluster
-   mode-switch feel, BRANDING §1 SOC/NOC sensibility). Both routes live
-   in a single bordered shell; the active segment fills with cyan and
-   gets a thin top accent line. */
-.nav-segments {
-  display: inline-flex;
-  align-items: stretch;
-  padding: 3px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
-  /* No margin-right: auto here — the empty navbar-nav.me-auto sibling
-     (or the crumb's margin-right: auto when present) handles pushing
-     the right-side controls to the far right. Two auto-margins next to
-     each other split the free space and pull adjacent items apart. */
-}
-.seg {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-  padding: 0.36rem 0.95rem;
-  border-radius: 6px;
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
-  font-size: 0.7rem;
-  font-weight: 700;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: #94a3b8;
-  text-decoration: none;
-  transition: color 160ms ease, background 160ms ease, box-shadow 200ms ease;
-}
-.seg:hover { color: #f1f5f9; }
-.seg:focus-visible {
-  outline: 2px solid #22d3ee;
-  outline-offset: 2px;
-}
-.seg-divider {
-  width: 1px;
-  margin: 4px 0;
-  background: rgba(148, 163, 184, 0.18);
-  transition: opacity 160ms ease;
-}
-.seg.is-active {
-  color: #67e8f9;
-  background: rgba(34, 211, 238, 0.12);
-  box-shadow:
-    inset 0 0 0 1px rgba(34, 211, 238, 0.28),
-    0 0 14px -4px rgba(34, 211, 238, 0.5);
-}
-/* Hairline cyan accent at the top of the active segment — reinforces
-   "selected mode" without making the segment look painted. */
-.seg.is-active::before {
-  content: "";
-  position: absolute;
-  left: 0.6rem;
-  right: 0.6rem;
-  top: 1px;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, #22d3ee 50%, transparent);
-  opacity: 0.55;
-}
-/* Hide the divider when one of the segments is active — the active
-   segment's box already provides separation. */
-.nav-segments:has(.is-active) .seg-divider { opacity: 0; }
-
-/* Docs lives in its own .nav-segments shell next to the view-mode toggle
-   — same chrome, same .seg styling on the link inside, just a separate
-   bordered unit so the visual grouping reads "Host/Hub | Docs" instead
-   of "Host/Hub/Docs". The --solo modifier gets a small left margin so
-   the two shells breathe; on mobile collapse it stacks below. */
-.nav-segments--solo {
-  margin-left: 0.5rem;
-}
-.nav-segments--solo .seg-icon {
-  font-size: 0.78rem;
-  opacity: 0.85;
-}
-.nav-segments--solo .seg:hover .seg-icon,
-.nav-segments--solo .seg.is-active .seg-icon { opacity: 1; }
-@media (max-width: 991.98px) {
-  .nav-segments--solo {
-    margin-left: 0;
-    margin-top: 0.4rem;
-    align-self: flex-start;
-  }
-}
-
-/* Breadcrumb crumb — shown next to the segmented control when we're on
-   a host-detail view. The chevron is a back-link to /hub; the chip
-   itself is a static "you are here" indicator carrying host name and
-   status colour. */
-.nav-crumb {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  margin-left: 0.45rem;
-  margin-right: auto;
-}
-.crumb-back {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 6px;
-  color: #64748b;
-  text-decoration: none;
-  transition: color 140ms ease, background 140ms ease;
-}
-.crumb-back:hover {
-  color: #22d3ee;
-  background: rgba(34, 211, 238, 0.08);
-}
-.crumb-chev { font-size: 0.62rem; }
-
-/* The host chip itself — name + status dot, with the truncation and
-   status-coloured pulse — lives in HostStatusChip.vue. The crumb here
-   only owns the wrapping back-arrow chrome. */
-
-/* "PRO" chip on the Hub segment — gold gradient (amber primary + secondary
-   from BRANDING §3.5) for an unmistakable premium-tier signal without
-   expanding the palette. Tiny, mono caps, dark text on gold for AA
-   contrast. */
-.seg-pro {
-  display: inline-flex;
-  align-items: center;
-  padding: 0.08rem 0.4rem 0.1rem;
-  border-radius: 4px;
-  background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 60%, #d97706 100%);
-  color: #422006;
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
-  font-size: 0.55rem;
-  font-weight: 700;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  line-height: 1;
-  box-shadow:
-    0 0 10px -2px rgba(251, 191, 36, 0.45),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.22);
-  /* Slight upward translate to optically center against caps text. */
-  transform: translateY(-0.5px);
-}
-/* Brighten the chip subtly when its segment is active or hovered — keeps
-   the gold from looking dim against the cyan-tinted active background. */
-.seg.is-active .seg-pro,
-.seg:hover .seg-pro {
-  box-shadow:
-    0 0 14px -2px rgba(251, 191, 36, 0.6),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.32);
-}
-.route-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 0.35rem;
-  border-radius: 999px;
-  background: rgba(244, 63, 94, 0.18);
-  color: #f87171;
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
-  font-size: 0.62rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  box-shadow: inset 0 0 0 1px rgba(244, 63, 94, 0.32);
-  animation: live-pulse 1.4s ease-in-out infinite;
-}
-@media (prefers-reduced-motion: reduce) {
-  .route-badge { animation: none; }
-}
-
-.hub-disconnect {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px; height: 26px;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  color: #9ca3af;
-  cursor: pointer;
-  transition: color 160ms ease, background 160ms ease, border-color 160ms ease;
-}
-.hub-disconnect:hover {
-  color: #f87171;
-  background: rgba(244, 63, 94, 0.08);
-  border-color: rgba(244, 63, 94, 0.32);
 }
 
 /* ---------- Mobile ---------- */

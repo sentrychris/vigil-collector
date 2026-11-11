@@ -17,10 +17,8 @@ describe("PageHeader", () => {
     const testSubject = getWrapper();
 
     expect(testSubject.exists()).toBeTruthy();
-    expect(testSubject.props()).toEqual(testProps);
-    expect(testSubject.html()).toContain(
-      `<p class="text-muted decor small">${testProps.decorTitle}</p>`,
-    );
-    expect(testSubject.html()).toContain(`<h1 class="header">${testProps.title}</h1>`);
+    expect(testSubject.props()).toEqual({ ...testProps, compact: false });
+    expect(testSubject.find(".eyebrow").text()).toBe(testProps.decorTitle);
+    expect(testSubject.find("h1.page-title").text()).toBe(testProps.title);
   });
 });

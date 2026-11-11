@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch, computed, onMounted, type Ref } from "vue";
 import { orderBy } from "lodash";
+import { sizeText } from "@/utilities/format-size";
 
 const props = defineProps<{
   type: string;
@@ -14,6 +15,10 @@ const props = defineProps<{
 const tableData = ref(props.data);
 const tableSortKey = ref("mem");
 const tableSortOrder: Ref<"asc" | "desc"> = ref("desc");
+
+// Process memory (``mem``) arrives in MiB; show it in MiB / GiB / TiB.
+const formatCell = (key: string, value: unknown) =>
+  key === "mem" && isNumeric(value) ? sizeText(Number(value), "MiB") : value;
 
 const formatHeader = (header: string) => {
   header = header.charAt(0).toUpperCase() + header.slice(1);
@@ -153,7 +158,7 @@ onMounted(() => {
           :key="index"
           :class="{ mono: isNumeric(object[content]) }"
         >
-          {{ object[content] }}
+          {{ formatCell(content, object[content]) }}
         </td>
       </tr>
     </tbody>

@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import type { DiskUsageInformation } from "@/interfaces/SystemInformation";
+import { formatSize } from "@/utilities/format-size";
 
 defineProps<{
   disks: DiskUsageInformation[];
 }>();
+
+const size = (gib: number) => formatSize(gib, "GiB", 1);
 </script>
 
 <template>
@@ -18,9 +21,12 @@ defineProps<{
           </span>
         </div>
         <div class="disk-usage">
-          <span class="used">{{ disk.used.toFixed(1) }}</span>
+          <span class="used">{{ size(disk.used).value }}<span
+            v-if="size(disk.used).unit !== size(disk.total).unit"
+            class="unit"
+          > {{ size(disk.used).unit }}</span></span>
           <span class="separator"> / </span>
-          <span class="total">{{ disk.total.toFixed(1) }}<span class="unit"> GiB</span></span>
+          <span class="total">{{ size(disk.total).value }}<span class="unit"> {{ size(disk.total).unit }}</span></span>
           <span
             class="percent"
             :class="{

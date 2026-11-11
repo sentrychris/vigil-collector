@@ -18,14 +18,13 @@ describe("CpuDetail", () => {
     });
 
   it("renders properly", () => {
-    const testHtml =
-      `<p class="small"><strong>Usage:</strong> ${testProps.detail.usage} %</p>\n` +
-      `<p class="small"><strong>Freq:</strong> ${testProps.detail.freq} MHz</p>\n`;
-
     const testSubject = getWrapper();
 
     expect(testSubject.exists()).toBeTruthy();
     expect(testSubject.props()).toEqual(testProps);
-    expect(testSubject.html()).toContain(testHtml);
+    const text = testSubject.text();
+    expect(text).toContain(`${testProps.detail.usage}%`);
+    expect(text).toContain(`${testProps.detail.freq} MHz`);
+    expect(text).toContain(`${testProps.detail.cores} vCPU`);
   });
 });

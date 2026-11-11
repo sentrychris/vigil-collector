@@ -17,15 +17,13 @@ describe("PlatformDetail", () => {
     });
 
   it("renders properly", () => {
-    const testHtml =
-      `<p class="small"><strong>OS:</strong> ${testProps.detail.distro}</p>\n` +
-      `<p class="small"><strong>Kernel:</strong> ${testProps.detail.kernel}</p>\n` +
-      `<p class="small"><strong>Uptime:</strong> ${testProps.detail.uptime}</p>`;
-
     const testSubject = getWrapper();
 
     expect(testSubject.exists()).toBeTruthy();
     expect(testSubject.props()).toEqual(testProps);
-    expect(testSubject.html()).toContain(testHtml);
+    const text = testSubject.text();
+    expect(text).toContain(testProps.detail.distro);
+    expect(text).toContain(testProps.detail.kernel);
+    expect(text).toContain(testProps.detail.uptime);
   });
 });

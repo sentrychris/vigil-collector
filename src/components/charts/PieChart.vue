@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatSize } from "@/utilities/format-size";
 import { computed, ref, watch, onMounted, onUnmounted } from "vue";
 
 type Slice = { name: string; color: string; y: number };
@@ -10,7 +11,7 @@ const props = withDefaults(
     series: Slice[];
     unit?: string;
   }>(),
-  { unit: "MB" },
+  { unit: "MiB" },
 );
 
 const SIZE = 220;
@@ -88,12 +89,12 @@ const hexToRgba = (hex: string, alpha: number) => {
   return `rgba(${(v >> 16) & 255},${(v >> 8) & 255},${v & 255},${alpha})`;
 };
 
+// Process memory arrives in MiB; larger values step up to GiB / TiB.
 const fmt = (n: number) => {
-  if (n >= 1024) {
-    const v = n / 1024;
-    return v.toFixed(v < 10 ? 2 : 1).replace(/\.?0+$/, "") + " GB";
-  }
-  return n.toFixed(0) + " " + props.unit;
+  const f = formatSize(n, "MiB");
+  if (f.unit === "MiB") return n.toFixed(0) + " MiB";
+  const v = Number(f.value);
+  return v.toFixed(v < 10 ? 2 : 1).replace(/\.?0+$/, "") + " " + f.unit;
 };
 
 const hovered = ref<string | null>(null);

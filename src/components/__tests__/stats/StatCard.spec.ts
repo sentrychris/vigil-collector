@@ -7,7 +7,7 @@ describe("StatCard", () => {
   const testProps = {
     title: "Lorem Ipsum",
     icon: "fa-solid fa-server",
-    bg: "dark",
+    tone: "amber" as const,
   };
 
   const getWrapper = () =>
@@ -29,7 +29,6 @@ describe("StatCard", () => {
     expect(testSubject.exists()).toBeTruthy();
     expect(testSubject.props()).toEqual(testProps);
     expect(testSubject.text()).toContain("Lorem Ipsum");
-    expect(testSubject.classes()).toContain("bg-dark");
-    expect(testSubject.classes()).toContain("text-white");
+    expect(testSubject.find(".stat-icon").classes()).toContain("tone-amber");
   });
 });
