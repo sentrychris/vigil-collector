@@ -279,13 +279,13 @@ fn mode_is_tray() -> bool {
     std::env::var_os(CHILD_ENV).is_some_and(|v| v == "1")
 }
 
-/// Starts a fresh tray process with the same arguments. Used by Restart,
-/// after this one has stopped listening.
 /// Whether a taken port should move this process on to the next free one.
 pub fn find_free_port() -> bool {
     std::env::var_os(FREE_PORT_ENV).is_some_and(|v| v == "1")
 }
 
+/// Starts a fresh tray process with the same arguments. Used by Restart,
+/// after this one has stopped listening.
 pub fn respawn() -> std::io::Result<()> {
     tray_command()?
         .stdout(Stdio::null())
