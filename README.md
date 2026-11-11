@@ -8,44 +8,29 @@ any client over HTTP or WebSocket.
 See it powering a real dashboard [here](https://status.edcs.app), paired with
 [Vigil UI](https://github.com/sentrychris/vigil), the comprehensive frontend.
 
+## Contents
+
+- [Quick start](#quick-start)
+- [Building](#building) - [Linux](#linux) · [Windows](#windows) · [macOS](#macos) · [Static and cross-compiled builds](#static-and-cross-compiled-builds)
+- [Running](#running)
+- [Running in the background](#running-in-the-background)
+- [Configuration](#configuration)
+- [HTTP endpoints](#http-endpoints) · [WebSocket](#websocket) · [Connecting from your own app](#connecting-from-your-own-app)
+- [Platform notes](#platform-notes)
+- [Development](#development)
+- [Architecture](#architecture)
+
 ## Quick start
 
-Runs on Linux, Windows and macOS. Requires Rust 1.95 or newer
-(`rustup update`).
-
 ```sh
-git clone https://github.com/sentrychris/vigil-collector && cd vigil-collector
-cargo build --release
-./target/release/vigil-collector
+git clone https://github.com/sentrychris/vigil-collector
+cd vigil-collector
+cargo run --release
 ```
 
-On Windows (PowerShell), with the MSVC toolchain that `rustup` installs by
-default:
-
-```powershell
-git clone https://github.com/sentrychris/vigil-collector; cd vigil-collector
-cargo build --release
-.\target\release\vigil-collector.exe
-```
-
-Defaults to `localhost:4500`. Hit `http://localhost:4500/system` to confirm
-it's running.
-
-```sh
-# custom address / port
-./target/release/vigil-collector --address 0.0.0.0 --port 4500
-```
-
-`Ctrl-C` (or `SIGTERM`; on Windows also Ctrl-Break, closing the console,
-logoff and shutdown) shuts everything down cleanly, sending connected
-WebSocket clients a `1001 Going Away` close. A settings file is created on
-first run at `~/.vigil-collector/settings.json`
-(`%USERPROFILE%\.vigil-collector\settings.json` on Windows) - see
-[Configuration](#configuration).
-
-Listening on `0.0.0.0` on Windows triggers a Windows Defender Firewall
-prompt the first time; allow it on private networks for other machines to
-reach the collector.
+Then open <http://localhost:4500> for the built-in dashboard, or
+<http://localhost:4500/system> for the raw JSON. Platform-specific setup is
+under [Building](#building).
 
 ## What you get
 
@@ -59,6 +44,259 @@ reach the collector.
   tells you which).
 - **One sampler shared by N clients** so extra dashboards don't multiply the
   work - every HTTP/WS read is an atomic load of pre-serialized JSON.
+
+## Building
+
+Vigil Collector builds from the same source on Linux, Windows and macOS.
+Every platform needs:
+
+- **Rust 1.95 or newer.** Install it with [rustup](https://rustup.rs); if you
+  already have it, run `rustup update`. Check with `rustc --version`.
+- **A C compiler.** The TLS library (`ring`, used for `/probes`) compiles a
+  small amount of C and assembly. There's no OpenSSL, CMake or NASM
+  dependency.
+
+The release binary is self-contained: the dashboard HTML and favicon are
+embedded, and nothing else needs to ship alongside it. It's about 5 MB
+stripped.
+
+### Linux
+
+Install a C toolchain and Rust:
+
+```sh
+# Debian / Ubuntu
+sudo apt install build-essential curl git
+# Fedora / RHEL
+sudo dnf install gcc make curl git
+# Arch
+sudo pacman -S base-devel curl git
+
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+Build and run:
+
+```sh
+git clone https://github.com/sentrychris/vigil-collector
+cd vigil-collector
+cargo build --release
+./target/release/vigil-collector
+```
+
+The binary is `target/release/vigil-collector`. To install it system-wide:
+
+```sh
+sudo install -m 755 target/release/vigil-collector /usr/local/bin/
+```
+
+### Windows
+
+1. Install the **Visual Studio C++ Build Tools**, which Rust's default
+   Windows toolchain uses as its linker and C compiler. Either install
+   [Build Tools for Visual Studio](https://visualstudio.microsoft.com/visual-cpp-build-tools/)
+   with the **Desktop development with C++** workload, or let `rustup-init`
+   offer to install it for you.
+2. Install Rust with
+   [rustup-init.exe](https://win.rustup.rs/x86_64) (or
+   `winget install Rustlang.Rustup`), accepting the default
+   `x86_64-pc-windows-msvc` toolchain.
+3. Build and run from PowerShell:
+
+```powershell
+git clone https://github.com/sentrychris/vigil-collector
+cd vigil-collector
+cargo build --release
+.\target\release\vigil-collector.exe
+```
+
+The binary is `target\release\vigil-collector.exe`. Copy it anywhere, for
+example `C:\Program Files\Vigil\`. It needs no installer, and the C runtime
+is linked in statically (see [.cargo/config.toml](.cargo/config.toml)), so
+it runs on machines without the Visual C++ Redistributable.
+
+Tested on Windows 11; Windows 10 uses the same APIs. No administrator
+rights are needed to run it.
+
+### macOS
+
+Install the Xcode command line tools and Rust, then build as on Linux:
+
+```sh
+xcode-select --install
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+git clone https://github.com/sentrychris/vigil-collector
+cd vigil-collector
+cargo build --release
+./target/release/vigil-collector
+```
+
+macOS is built and smoke-tested in CI but hasn't been tried on a real Mac
+yet. It reports less than Linux and Windows (no disk I/O; see
+[Platform notes](#platform-notes)).
+
+### Static and cross-compiled builds
+
+**Fully static Linux binary** (runs on any x86-64 distro, including Alpine
+and minimal containers):
+
+```sh
+sudo apt install musl-tools        # provides musl-gcc for the C parts
+rustup target add x86_64-unknown-linux-musl
+cargo build --release --target x86_64-unknown-linux-musl
+# -> target/x86_64-unknown-linux-musl/release/vigil-collector
+```
+
+**Windows binary from Linux**, using the MinGW toolchain:
+
+```sh
+sudo apt install gcc-mingw-w64-x86-64
+rustup target add x86_64-pc-windows-gnu
+cargo build --release --target x86_64-pc-windows-gnu
+# -> target/x86_64-pc-windows-gnu/release/vigil-collector.exe
+```
+
+The `x86_64-pc-windows-msvc` target can't be cross-compiled from Linux this
+way (ring needs `clang-cl` for it). Build MSVC binaries on Windows, or use
+the GNU target above; both behave the same at runtime.
+
+## Running
+
+```sh
+vigil-collector                                  # localhost:4500
+vigil-collector --address 0.0.0.0 --port 4500    # listen on every interface
+vigil-collector --help
+```
+
+By default the collector listens on `localhost:4500`, so only the same
+machine can reach it. Use `--address 0.0.0.0` (or set `address` in the
+[settings file](#configuration)) to serve other machines on your network.
+On Windows, the first time it listens on a non-local address, Windows
+Defender Firewall asks whether to allow it. Allow it on private networks.
+
+On first run it logs where the settings file was created, then the
+address it's listening on:
+
+```text
+[2026-11-11 14:12:47]  INFO Created settings file at /home/you/.vigil-collector/settings.json
+[2026-11-11 14:12:47]  INFO Listening on http://127.0.0.1:4500
+```
+
+**Stopping:** `Ctrl-C`, or `SIGTERM` on Linux and macOS. On Windows,
+`Ctrl-Break`, closing the console window, signing out and shutting down
+also stop it cleanly. Connected WebSocket clients get a `1001 Going Away`
+close frame, so dashboards can tell a restart from a crash.
+
+## Running in the background
+
+### Linux (systemd)
+
+A unit file is included at
+[systemd/vigil-collector.service](systemd/vigil-collector.service).
+
+```sh
+sudo install -m 755 target/release/vigil-collector /usr/local/bin/
+sudo cp systemd/vigil-collector.service /etc/systemd/system/
+sudo nano /etc/systemd/system/vigil-collector.service   # set User= and Group=
+sudo systemctl daemon-reload
+sudo systemctl enable --now vigil-collector
+journalctl -u vigil-collector -f                        # follow the logs
+```
+
+The unit listens on `0.0.0.0:4700`; change `ExecStart` to suit. The
+settings file lives in the home folder of the `User=` you chose.
+
+### Windows (Task Scheduler)
+
+The collector is a console program, not a Windows service. To start it at
+boot with no console window, register a scheduled task that runs it as
+`SYSTEM`. From an **elevated** PowerShell:
+
+```powershell
+$exe = "C:\Program Files\Vigil\vigil-collector.exe"   # wherever you put it
+$action = New-ScheduledTaskAction -Execute $exe -Argument "--address 0.0.0.0 --port 4500"
+$trigger = New-ScheduledTaskTrigger -AtStartup
+$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) `
+    -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
+Register-ScheduledTask -TaskName "Vigil Collector" -Action $action -Trigger $trigger `
+    -Settings $settings -User "SYSTEM" -RunLevel Highest
+Start-ScheduledTask -TaskName "Vigil Collector"
+```
+
+Running as `SYSTEM`, its home folder is
+`C:\Windows\System32\config\systemprofile`, so its settings file and logs
+are under that folder rather than yours. To remove the task:
+`Unregister-ScheduledTask -TaskName "Vigil Collector"`.
+
+### macOS (launchd)
+
+Save this as `~/Library/LaunchAgents/app.vigil.collector.plist`, adjusting
+the binary path, then run
+`launchctl load ~/Library/LaunchAgents/app.vigil.collector.plist`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>app.vigil.collector</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/vigil-collector</string>
+    <string>--address</string><string>0.0.0.0</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+</dict>
+</plist>
+```
+
+## Configuration
+
+A settings file is created with defaults on first run. All keys are
+optional; a missing key takes its default, and a file that doesn't parse is
+reported in the log and ignored, so a typo never stops the collector
+starting.
+
+| | Linux / macOS | Windows |
+|---|---|---|
+| Settings | `~/.vigil-collector/settings.json` | `%USERPROFILE%\.vigil-collector\settings.json` |
+| Log file | `~/.vigil-collector-logs/app.log` | `%USERPROFILE%\.vigil-collector-logs\app.log` |
+
+| Key | Default | Description |
+|---|---|---|
+| `address` | `"localhost"` | HTTP listen address |
+| `port_number` | `4500` | HTTP listen port |
+| `max_ws_connections` | `20` | Cap on concurrent WebSocket clients |
+| `ws_push_interval` | `1.0` | Seconds between WS frames (also the sampler tick rate; minimum `0.1`) |
+| `probes` | `[ ... ]` | List of `{name, url}` entries probed by `/probes` |
+| `probe_timeout` | `5.0` | Per-probe HTTP timeout, seconds |
+| `logging_enabled` | `true` | Toggle logging (console and file) |
+| `log_level` | `"INFO"` | `DEBUG` / `INFO` / `WARNING` / `ERROR` |
+
+Example:
+
+```json
+{
+  "address": "0.0.0.0",
+  "port_number": 4500,
+  "ws_push_interval": 1.0,
+  "probes": [
+    { "name": "my site", "url": "https://example.com" }
+  ]
+}
+```
+
+- `--address` and `--port` override the file at startup.
+- `RUST_LOG` (e.g. `RUST_LOG=vigil_collector=debug`) overrides `log_level`.
+- `NO_COLOR=1` turns off coloured console output. Colour is also off
+  automatically when output isn't a terminal (a file, journald, a pipe).
+- The log file is cleared at each startup.
+- On Windows, editing the file in Notepad is fine: the UTF-8 byte-order mark
+  it adds is accepted.
+- The probe list is re-read on every `/probes` request, so it can be
+  changed without a restart. Other settings need a restart.
 
 ## HTTP endpoints
 
@@ -146,65 +384,6 @@ Requires a valid worker ID from `POST /worker`. Once connected, the server
 pushes the `/system` snapshot at the configured interval (1 s by default)
 until either side closes.
 
-## Configuration
-
-`~/.vigil-collector/settings.json` is created with sensible defaults on first
-run; all keys are optional.
-
-| Key | Default | Description |
-|---|---|---|
-| `address` | `"localhost"` | HTTP listen address |
-| `port_number` | `4500` | HTTP listen port |
-| `max_ws_connections` | `20` | Cap on concurrent WebSocket clients |
-| `ws_push_interval` | `1.0` | Seconds between WS frames (also the sampler tick rate) |
-| `probes` | `[ ... ]` | List of `{name, url}` entries probed by `/probes` |
-| `probe_timeout` | `5.0` | Per-probe HTTP timeout, seconds |
-| `logging_enabled` | `true` | Toggle file logging |
-| `log_level` | `"INFO"` | `DEBUG` / `INFO` / `WARNING` / `ERROR` |
-
-CLI flags (`--address`, `--port`) override the file at startup. `RUST_LOG`
-overrides `log_level`, and `NO_COLOR` turns off coloured console output.
-The file may be saved with a UTF-8 byte-order mark (as Notepad does).
-
-## Platform notes
-
-| Metric | Linux | Windows | macOS |
-|---|---|---|---|
-| Disk usage | `statvfs`, `df`-exact | `GetDiskFreeSpaceExW` | `statvfs` |
-| Disk I/O + IOPS | `/proc/diskstats` | `IOCTL_DISK_PERFORMANCE` per physical drive | not reported (`0`) |
-| CPU temperature | hwmon / thermal zones | not reported (`0`) | SMC sensors |
-| Load average | yes | `null` | yes |
-| Process memory | PSS when readable, else RSS | working set | RSS |
-| Dropped packets | yes | `0` | `0` |
-
-Nothing needs admin/root on any platform. Running as root on Linux lets the
-collector read PSS for every process instead of only your own.
-
-## Running in the background
-
-**Linux (systemd):** see [systemd/vigil-collector.service](systemd/vigil-collector.service).
-Copy the binary to `/usr/local/bin`, fill in `User`/`Group`, then
-`sudo systemctl enable --now vigil-collector`.
-
-**Windows:** the collector is a console program, not a Windows service.
-To start it automatically in the background, register a scheduled task
-from an elevated PowerShell. Running it as `SYSTEM` starts it at boot with
-no console window:
-
-```powershell
-$exe = "C:\Program Files\Vigil\vigil-collector.exe"   # wherever you put it
-$action = New-ScheduledTaskAction -Execute $exe -Argument "--address 0.0.0.0 --port 4500"
-$trigger = New-ScheduledTaskTrigger -AtStartup
-$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) `
-    -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
-Register-ScheduledTask -TaskName "Vigil Collector" -Action $action -Trigger $trigger `
-    -Settings $settings -User "SYSTEM" -RunLevel Highest
-```
-
-As `SYSTEM`, its home folder is `C:\Windows\System32\config\systemprofile`,
-so that's where `.vigil-collector\settings.json` and the logs go.
-
-
 ## Connecting from your own app
 
 ```js
@@ -223,6 +402,48 @@ ws.onmessage = (event) => {
 Each worker is single-use and expires in 5 seconds if unclaimed. Closing the
 WebSocket frees it. A connect refused with `503` (server at
 `max_ws_connections`) doesn't use up the worker id.
+
+## Platform notes
+
+| Metric | Linux | Windows | macOS |
+|---|---|---|---|
+| Disk usage | `statvfs`, `df`-exact | `GetDiskFreeSpaceExW` | `statvfs` |
+| Disk I/O + IOPS | `/proc/diskstats` | `IOCTL_DISK_PERFORMANCE` per physical drive | not reported (`0`) |
+| CPU temperature | hwmon / thermal zones | not reported (`0`) | SMC sensors |
+| Load average | yes | `null` | yes |
+| Process memory | PSS when readable, else RSS | working set | RSS |
+| Dropped packets | yes | `0` | `0` |
+
+Nothing needs admin/root on any platform. Running as root on Linux lets the
+collector read PSS for every process instead of only your own.
+
+On Windows, network throughput leaves out NDIS filter interfaces (such as
+"WiFi-VirtualBox NDIS Light-Weight Filter-0000"), which mirror the adapter
+underneath them and would otherwise count its traffic twice. Hyper-V / WSL
+virtual switches are kept, like `docker0` on Linux.
+
+## Development
+
+```sh
+cargo fmt                                   # format
+cargo clippy --all-targets -- -D warnings   # lint (warnings are errors in CI)
+cargo test                                  # unit tests
+RUST_LOG=vigil_collector=debug cargo run    # run with debug logging
+```
+
+CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs all of
+these on Linux, Windows and macOS, then starts the release binary and
+checks that `/system`, `/network`, `/worker` and the dashboard respond with
+the expected payload. Platform-specific code lives behind `#[cfg(...)]` in
+`src/metrics/` and `src/log.rs`; if you change it, cross-check the other
+targets:
+
+```sh
+cargo clippy --all-targets --target x86_64-pc-windows-gnu -- -D warnings
+```
+
+Contributor docs, including the full data flow and runtime model, are in
+[docs/](docs/ARCHITECTURE.md).
 
 ## Architecture
 
@@ -268,7 +489,7 @@ stayed on it.
 For a monitoring agent the agent itself shouldn't be a top consumer in its
 own output, so the per-tick budget got profiled and trimmed.
 
-Profiling a baseline tick (sampler running, no clients) showed:
+Profiling a baseline tick on Linux (sampler running, no clients) showed:
 
 | Step | Time | % of tick |
 |---|---|---|
@@ -290,42 +511,23 @@ Three rate-limit decisions cut that to ~3,000 µs/tick on average:
   5-tick cycle. Frequency is a display value with no delta semantics, so
   freshness is irrelevant here.
 - **Mount table re-scanned once a minute** (`DISK_LIST_REFRESH_EVERY = 60`)
-  instead of every tick. We never read sysinfo's stored disk usage anyway -
-  `usage_for_mount` calls `statvfs` itself for the byte-compatible
-  `(f_blocks - f_bfree)` accounting - so sysinfo's per-tick `Disks::refresh`
-  is purely waste and gets skipped. `Disks::refresh_list` catches
-  mount/unmount events.
+  instead of every tick. Per-disk usage is read directly every tick
+  (`statvfs` on Unix for the `df`-compatible `(f_blocks - f_bfree)`
+  accounting, `GetDiskFreeSpaceExW` on Windows), so sysinfo only needs to
+  re-list the disks to catch mount/unmount events.
 
 What stays at every-tick cadence (because it's a counter delta and a 1 s
 window is the contract):
 
-- CPU usage % (from `/proc/stat` global counters)
+- CPU usage % (from `/proc/stat` global counters; PDH counters on Windows)
 - Memory used/free
-- Disk I/O bytes/sec and IOPS (from `/proc/diskstats` deltas)
+- Disk I/O bytes/sec and IOPS (from `/proc/diskstats` deltas;
+  `IOCTL_DISK_PERFORMANCE` on Windows)
 - Network rx/tx bytes/sec (from sysinfo's per-iface counter deltas)
 
-The per-disk usage walk via `statvfs` runs every tick too, but it's only
+The per-disk usage walk runs every tick too, but it's only
 ~30 µs total - cheap enough that the dashboard always sees fresh values.
 
 End result: idle CPU usage settles around ~0.23% of a single core, and stays
 there regardless of how many clients connect, because the per-tick work
 doesn't scale with client count.
-
-## Single-binary build
-
-```sh
-cargo build --release
-```
-
-`target/release/vigil-collector` (`vigil-collector.exe` on Windows) is a
-self-contained executable - the dashboard HTML, favicon, and every runtime
-dependency are baked in. TLS for `/probes` uses rustls with the ring
-provider and the OS certificate store, so there is no OpenSSL dependency
-and no CMake/NASM needed to build on Windows. Stripped binary is ~5 MB.
-
-For a fully static binary on Linux:
-
-```sh
-rustup target add x86_64-unknown-linux-musl
-cargo build --release --target x86_64-unknown-linux-musl
-```
