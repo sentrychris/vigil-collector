@@ -7,7 +7,7 @@ import { config } from "@/config";
     <div class="container-fluid py-3 footer-inner">
       <span class="footer-text">
         Powered by
-        <a class="footer-link" href="https://vigil.edcs.app">{{
+        <a class="footer-link" href="https://versyx.digital/vigil/">{{
           config.app.name
         }}</a>
         <span class="footer-sep d-none">·</span>
