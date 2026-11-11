@@ -947,8 +947,8 @@
                                 <thead>
                                     <tr>
                                         <th class="ps-4">Interface</th>
-                                        <th class="text-end">RX (MiB)</th>
-                                        <th class="text-end">TX (MiB)</th>
+                                        <th class="text-end">RX</th>
+                                        <th class="text-end">TX</th>
                                         <th class="text-end">RX pkt</th>
                                         <th class="text-end">TX pkt</th>
                                         <th class="text-end">Err in/out</th>
@@ -988,7 +988,7 @@
                                     <th>Process</th>
                                     <th>User</th>
                                     <th class="text-end">PID</th>
-                                    <th class="text-end pe-4">Memory (MiB)</th>
+                                    <th class="text-end pe-4">Memory</th>
                                 </tr>
                             </thead>
                             <tbody id="processes-tbody">
@@ -1122,10 +1122,34 @@
 
             const formatBytesPerSec = (bps) => {
                 if (bps == null || isNaN(bps)) return "--";
-                const units = ["B/s", "KiB/s", "MiB/s", "GiB/s"];
+                const units = ["B/s", "KiB/s", "MiB/s", "GiB/s", "TiB/s"];
                 let v = Number(bps), i = 0;
                 while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
                 return `${v.toFixed(v >= 100 ? 0 : v >= 10 ? 1 : 2)} ${units[i]}`;
+            };
+
+            // Sizes arrive in MiB (process memory, interface totals) or GiB
+            // (memory, disks). Show each in the largest of MiB / GiB / TiB
+            // that keeps the number at 1 or more.
+            const SIZE_UNITS = ["MiB", "GiB", "TiB"];
+            const formatSize = (value, unit = "GiB") => {
+                const n = Number(value);
+                if (value == null || value === "" || isNaN(n)) return { value: "--", unit };
+                let v = n * 1024 ** SIZE_UNITS.indexOf(unit), i = 0;
+                while (Math.abs(v) >= 1024 && i < SIZE_UNITS.length - 1) { v /= 1024; i++; }
+                return { value: v.toFixed(2), unit: SIZE_UNITS[i] };
+            };
+            const sizeHTML = (value, unit) => {
+                const f = formatSize(value, unit);
+                return `${f.value} <span class="text-dim">${f.unit}</span>`;
+            };
+            // Stat cards: <span id=…>value</span><small>unit</small>
+            const setSize = (id, value) => {
+                const el = document.getElementById(id);
+                if (!el || value === undefined || value === null || value === "") return;
+                const f = formatSize(value);
+                el.textContent = f.value;
+                if (el.nextElementSibling) el.nextElementSibling.textContent = f.unit;
             };
 
             const meterClass = (pct) => pct >= 90 ? "danger" : pct >= 75 ? "warn" : "";
@@ -1203,16 +1227,16 @@
                     setMeter($("#cpu-meter"), data.cpu.usage);
                 }
                 if (data.mem) {
-                    setText("mem-used", data.mem.used);
-                    setText("mem-free", data.mem.free);
-                    setText("mem-total", data.mem.total);
+                    setSize("mem-used", data.mem.used);
+                    setSize("mem-free", data.mem.free);
+                    setSize("mem-total", data.mem.total);
                     setText("mem-percent", data.mem.percent);
                     setMeter($("#mem-meter"), data.mem.percent);
                 }
                 if (data.disk) {
-                    setText("disk-used", data.disk.used);
-                    setText("disk-free", data.disk.free);
-                    setText("disk-total", data.disk.total);
+                    setSize("disk-used", data.disk.used);
+                    setSize("disk-free", data.disk.free);
+                    setSize("disk-total", data.disk.total);
                     setText("disk-percent", data.disk.percent);
                     setMeter($("#disk-meter"), data.disk.percent);
                 }
@@ -1256,9 +1280,9 @@
                         <td class="ps-4 mono">${escapeHTML(d.device || "—")}</td>
                         <td class="mono">${escapeHTML(d.mountpoint || "—")}</td>
                         <td><span class="chip purple">${escapeHTML(d.fstype || "—")}</span></td>
-                        <td class="text-end mono">${d.used} <span class="text-dim">GiB</span></td>
-                        <td class="text-end mono">${d.free} <span class="text-dim">GiB</span></td>
-                        <td class="text-end mono">${d.total} <span class="text-dim">GiB</span></td>
+                        <td class="text-end mono">${sizeHTML(d.used)}</td>
+                        <td class="text-end mono">${sizeHTML(d.free)}</td>
+                        <td class="text-end mono">${sizeHTML(d.total)}</td>
                         <td>
                             <div style="display:flex;align-items:center;gap:.6rem;">
                                 <div class="bar ${cls}" style="flex:1;margin-top:0;"><span style="width:${pct}%"></span></div>
@@ -1291,7 +1315,7 @@
                         <td class="text-end pe-4">
                             <div style="display:flex;align-items:center;gap:.5rem;justify-content:flex-end;">
                                 <div class="mini-bar"><span style="width:${w}%"></span></div>
-                                <span class="mono" style="min-width:3.5rem;text-align:right;">${mem.toFixed(2)}</span>
+                                <span class="mono" style="min-width:5.5rem;text-align:right;">${sizeHTML(mem, "MiB")}</span>
                             </div>
                         </td>
                     </tr>`;
@@ -1349,8 +1373,8 @@
                 tbody.innerHTML = entries.map(([nic, s]) => `
                     <tr>
                         <td class="ps-4 mono" style="color:var(--text);">${escapeHTML(nic)}</td>
-                        <td class="text-end mono">${(s.mb_received || 0).toFixed(2)}</td>
-                        <td class="text-end mono">${(s.mb_sent || 0).toFixed(2)}</td>
+                        <td class="text-end mono">${sizeHTML(s.mb_received || 0, "MiB")}</td>
+                        <td class="text-end mono">${sizeHTML(s.mb_sent || 0, "MiB")}</td>
                         <td class="text-end mono text-dim">${s.pk_received ?? 0}</td>
                         <td class="text-end mono text-dim">${s.pk_sent ?? 0}</td>
                         <td class="text-end mono ${(s.error_in || s.error_out) ? 'text-warn' : 'text-dim'}">${s.error_in ?? 0} / ${s.error_out ?? 0}</td>
