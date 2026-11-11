@@ -1,0 +1,12 @@
+@import "node_modules/bootstrap/scss/functions";
+@import "node_modules/bootstrap/scss/variables";
+@import "node_modules/bootstrap/scss/mixins";
+
+$brand: #f5f5f5;
+$theme-colors: (
+  "primary": #4fa1e9,
+  "success": #41b883,
+  "danger": #ff4136,
+  "warning": #ff906b,
+  "dark": #1e1e1e,
+);

@@ -1,0 +1,246 @@
+@import "variables";
+@import "~bootstrap/scss/bootstrap.scss";
+
+@import url("https://fonts.googleapis.com/css2?family=Lato:wght@200;300;400&family=Noto+Sans:wght@200;300;400&family=Nunito:wght@200;300;400&family=Open+Sans&family=Oxygen&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Exo+2:ital,wght@0,100..900;1,100..900&family=Orbitron:wght@400..900&display=swap");
+@import url('https://fonts.googleapis.com/css2?family=Ubuntu:ital,wght@0,300;0,400;0,500;0,700;1,300;1,400;1,500;1,700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@0,100..900;1,100..900&family=Ubuntu:ital,wght@0,300;0,400;0,500;0,700;1,300;1,400;1,500;1,700&display=swap');
+
+@import "./dark.scss";
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  font-family: "Montserrat", "Open Sans", sans-serif;
+  background: #eeeeee;
+  position: relative;
+}
+
+/* Ambient glow gradient — soft blobs in the dashboard accent tones, fixed to
+   the viewport so it doesn't scroll with content. Sits behind everything. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(900px circle at 12% 8%,  rgba(96, 165, 250, 0.22), transparent 65%),
+    radial-gradient(800px circle at 88% 22%, rgba(167, 139, 250, 0.18), transparent 65%),
+    radial-gradient(1000px circle at 55% 110%, rgba(34, 211, 238, 0.18), transparent 65%),
+    radial-gradient(700px circle at 30% 85%, rgba(16, 185, 129, 0.10), transparent 60%);
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.page-wrapper {
+  flex-grow: 1;
+}
+
+p {
+  margin-bottom: 0;
+}
+
+.cursor-pointer {
+  cursor: pointer;
+
+  .indicators {
+    svg {
+      color: lighten($color: #000000, $amount: 75);
+
+      &.active {
+        color: #000000;
+      }
+    }
+  }
+
+  &:hover {
+    .indicators {
+      svg {
+        color: #000000;
+      }
+    }
+  }
+}
+
+h1.header {
+  font-weight: 200;
+}
+
+h2.header {
+  font-size: var(--fs-display);
+}
+
+.page-section {
+  margin-top: 0.7rem;
+  margin-bottom: 0.7rem;
+}
+@media (max-width: 575.98px) {
+  .page-section {
+    margin-top: 0.55rem;
+    margin-bottom: 0.55rem;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Type scale — single source of truth for font sizing across the app.
+   Six steps total. Components reference these via var(--fs-…) where
+   convenient; raw values are in line below for SCSS-scoped places where
+   custom properties don't compose cleanly with media queries.
+
+   --fs-micro    10px  — chips, badges, eyebrows, technical labels
+   --fs-caption  12px  — URLs, mono data rows, secondary labels
+   --fs-body     14px  — primary body text, list-item names
+   --fs-heading  16px  — section / stat card titles
+   --fs-display 24px  — large metric values
+   --fs-hero    30px  — primary "instrument" numbers
+   ───────────────────────────────────────────────────────────────────────── */
+:root {
+  --fs-micro:   0.625rem;
+  --fs-caption: 0.75rem;
+  --fs-body:    0.875rem;
+  --fs-heading: 1rem;
+  --fs-display: 1.5rem;
+  --fs-hero:    1.875rem;
+}
+
+/* SOC dashboard utility class — applies a tight Orbitron number rendering
+   style for primary metrics that should feel "instrument cluster" technical. */
+.metric-num {
+  font-family: "Montserrat", "Exo 2", monospace;
+  font-feature-settings: "tnum";
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+}
+
+/* Shared "panel" card chrome used by every dashboard section. The header
+   itself is rendered by <SectionHeader/>; this just gives consistent
+   rounding, body padding, and dark-theme fallbacks to anything that opts
+   into the .panel-card class. */
+.panel-card {
+  border-radius: 14px !important;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.72) !important;
+  border: 1px solid rgba(255, 255, 255, 0.85) !important;
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.9) inset,
+    0 8px 24px -8px rgba(15, 23, 42, 0.18),
+    0 24px 48px -16px rgba(15, 23, 42, 0.18) !important;
+  transition: transform 0.25s ease, box-shadow 0.25s ease,
+    border-color 0.25s ease;
+}
+.panel-card:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.9) inset,
+    0 12px 32px -10px rgba(15, 23, 42, 0.22),
+    0 32px 64px -20px rgba(15, 23, 42, 0.22) !important;
+}
+.panel-card .panel-body {
+  padding: 0.85rem 1rem 0.95rem;
+}
+@media (max-width: 575.98px) {
+  .panel-card .panel-body { padding: 0.7rem 0.85rem 0.8rem; }
+}
+
+/* When a panel-card is `.flex-fill` (stretched to its column's height by a
+   parent `d-flex` row), turn it into a flex column and let the body grow
+   so things like chart wrappers can use `height: 100%` to fill. */
+.panel-card.flex-fill {
+  display: flex;
+  flex-direction: column;
+}
+.panel-card.flex-fill > .panel-body {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+body[data-theme="dark"] .panel-card {
+  background: rgba(15, 23, 42, 0.55) !important;
+  border: 1px solid rgba(148, 163, 184, 0.14) !important;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.04) inset,
+    0 8px 24px -8px rgba(0, 0, 0, 0.55),
+    0 28px 56px -18px rgba(0, 0, 0, 0.6),
+    0 0 0 1px rgba(96, 165, 250, 0.05) !important;
+}
+body[data-theme="dark"] .panel-card:hover {
+  border-color: rgba(96, 165, 250, 0.28) !important;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.05) inset,
+    0 12px 32px -10px rgba(0, 0, 0, 0.65),
+    0 36px 72px -20px rgba(0, 0, 0, 0.7),
+    0 0 24px -4px rgba(96, 165, 250, 0.18) !important;
+}
+
+/* Tighten container gutters on mobile so cards don't crowd the edge */
+@media (max-width: 575.98px) {
+  .container,
+  .container-fluid { padding-left: 0.75rem; padding-right: 0.75rem; }
+}
+
+/* Soft section subtitle/eyebrow used in the page header */
+.eyebrow {
+  font-size: var(--fs-micro);
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.22em;
+  color: #6b7280;
+}
+body[data-theme="dark"] .eyebrow {
+  color: #8b8d8f;
+}
+
+svg.d3-svg {
+  /* important for responsiveness */
+  display: block;
+  fill: none;
+  stroke: none;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  background: #eee;
+}
+
+/* we will explain what these classes do next! */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 1s ease-out;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+.form-check-input:checked {
+  background-color: #595a5c;
+  border-color: #707172;
+}
+
+.axis path,
+.axis line {
+  fill: none;
+  stroke: grey;
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+
+.axis path,
+.axis line {
+  fill: none;
+  stroke: black;
+  opacity: 0.2;
+}
+
+.text-muted {
+  color: rgb(127 127 127 / 75%) !important;
+}

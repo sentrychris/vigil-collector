@@ -1,0 +1,136 @@
+@import "./_variables.scss";
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Dark theme palette
+   Single source of truth for every dark surface, accent, and text token.
+   Components reference these via var(--token-name) so palette tweaks here
+   propagate everywhere without touching scoped styles.
+   ───────────────────────────────────────────────────────────────────────── */
+body[data-theme="dark"] {
+  /* Surfaces (deepest → most elevated) */
+  --bg-page:      #0a0e17;
+  --bg-surface:   #0f172a;
+  --bg-elevated:  #1e293b;
+  --bg-hover:     rgba(255, 255, 255, 0.04);
+  --bg-input:     rgba(255, 255, 255, 0.05);
+
+  /* Text scale */
+  --text-primary:   #f1f5f9;
+  --text-secondary: #cbd5e1;
+  --text-muted:     #94a3b8;
+  --text-dim:       #64748b;
+
+  /* Borders / dividers */
+  --border-subtle:  rgba(148, 163, 184, 0.10);
+  --border-default: rgba(148, 163, 184, 0.16);
+  --border-accent:  rgba(96, 165, 250, 0.22);
+
+  /* Brand / accent */
+  --accent-blue: #60a5fa;
+  --accent-cyan: #22d3ee;
+
+  /* Status */
+  --status-ok:    #34d399;
+  --status-warn:  #fbbf24;
+  --status-crit:  #f87171;
+  --status-info:  #60a5fa;
+
+  /* Header gradient — used by navbar, footer, every SectionHeader */
+  --header-grad: linear-gradient(135deg, #111827 0%, #1e293b 100%);
+
+  /* ── Apply ───────────────────────────────────────────────────────────── */
+  background: var(--bg-page);
+  color: var(--text-primary);
+
+  --bs-dark-rgb: 45, 45, 45;
+
+  &::before {
+    background:
+      radial-gradient(1000px circle at 10% 6%,  rgba(96, 165, 250, 0.28), transparent 60%),
+      radial-gradient(900px  circle at 92% 18%, rgba(167, 139, 250, 0.22), transparent 60%),
+      radial-gradient(1100px circle at 55% 115%, rgba(34, 211, 238, 0.22), transparent 60%),
+      radial-gradient(750px  circle at 25% 80%, rgba(245, 158, 11, 0.12), transparent 55%),
+      radial-gradient(700px  circle at 80% 65%, rgba(244, 63, 94, 0.10), transparent 55%);
+  }
+
+  table {
+    --bs-table-bg: var(--bg-surface);
+    --bs-table-color: var(--text-secondary);
+    --bs-table-striped-color: var(--text-secondary);
+    --bs-border-color: var(--border-default);
+  }
+
+  .pagination {
+    --bs-pagination-bg: var(--bg-surface);
+    --bs-pagination-border-color: var(--border-default);
+    --bs-pagination-color: var(--text-primary);
+
+    --bs-pagination-hover-bg: var(--bg-elevated);
+    --bs-pagination-hover-border-color: var(--border-default);
+    --bs-pagination-hover-color: #ffffff;
+
+    --bs-pagination-active-bg: var(--bg-elevated);
+    --bs-pagination-active-border-color: var(--border-accent);
+    --bs-pagination-active-color: #ffffff;
+
+    --bs-pagination-disabled-bg: var(--bg-surface);
+    --bs-pagination-disabled-border-color: var(--border-default);
+    --bs-pagination-disabled-color: var(--text-muted);
+  }
+
+  .dropdown-menu {
+    --bs-dropdown-bg: var(--bg-surface);
+    --bs-dropdown-color: var(--text-primary);
+
+    --bs-dropdown-link-color: var(--text-primary);
+    --bs-dropdown-link-hover-color: #ffffff;
+    --bs-dropdown-link-hover-bg: var(--bg-elevated);
+    --bs-dropdown-link-active-color: #ffffff;
+    --bs-dropdown-link-active-bg: var(--bg-elevated);
+
+    --bs-dropdown-divider-bg: var(--border-default);
+  }
+
+  .card:not(.stat-card) {
+    --bs-card-bg: var(--bg-surface);
+    --bs-card-color: var(--text-secondary);
+
+    .card-header {
+      --bs-card-cap-color: var(--text-secondary);
+    }
+  }
+
+  .btn-outline-dark {
+    --bs-btn-color: var(--text-primary);
+    --bs-btn-border-color: var(--border-default);
+    --bs-btn-hover-color: #fff;
+    --bs-btn-hover-bg: var(--bg-elevated);
+    --bs-btn-hover-border-color: var(--accent-blue);
+  }
+
+  .form-check-input {
+    background-color: var(--bg-elevated);
+    border-color: var(--border-default);
+  }
+  .form-check-input:checked {
+    background-color: var(--accent-blue);
+    border-color: var(--accent-blue);
+  }
+
+  /* Bootstrap utility overrides */
+  .text-dark { color: var(--text-primary) !important; }
+  .text-white { color: var(--text-secondary) !important; }
+  .text-muted { color: var(--text-muted) !important; }
+
+  /* d3 axes */
+  .axis path,
+  .axis line {
+    fill: none;
+    stroke: var(--text-muted);
+    stroke-width: 1;
+    shape-rendering: crispEdges;
+    opacity: 0.2;
+  }
+  .axis text,
+  .tick text { fill: var(--text-muted); }
+}

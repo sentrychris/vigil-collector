@@ -1,0 +1,48 @@
+{
+  "name": "system-monitor",
+  "version": "1.0.0",
+  "scripts": {
+    "prebuild": "node -p \"'export const APP_VERSION = ' + JSON.stringify(require('./package.json').version) + ';'\" > src/version.ts",
+    "dev": "vite",
+    "build": "npm run prebuild && run-p type-check build-only",
+    "preview": "vite preview",
+    "test:unit": "vitest --environment jsdom --root src/",
+    "test:e2e": "playwright test",
+    "build-only": "vite build",
+    "type-check": "vue-tsc --noEmit -p tsconfig.vitest.json --composite false"
+  },
+  "dependencies": {
+    "@fortawesome/fontawesome-svg-core": "^7.2.0",
+    "@fortawesome/free-regular-svg-icons": "^7.2.0",
+    "@fortawesome/free-solid-svg-icons": "^7.2.0",
+    "@fortawesome/vue-fontawesome": "^3.2",
+    "@popperjs/core": "^2.11",
+    "axios": "^1.7",
+    "bootstrap": "^5.3",
+    "d3": "^7.9",
+    "lodash": "^4.17",
+    "pinia": "^2.2",
+    "pinia-plugin-persistedstate": "^4.0.1",
+    "vue": "^3.5",
+    "vue-router": "^4.4"
+  },
+  "devDependencies": {
+    "@pinia/testing": "0.1.5",
+    "@playwright/test": "^1.47",
+    "@types/d3": "^7.4",
+    "@types/jsdom": "^21.1",
+    "@types/lodash": "^4.17",
+    "@types/node": "^22.5",
+    "@vitejs/plugin-vue": "^5.1",
+    "@vue/test-utils": "^2.4",
+    "@vue/tsconfig": "^0.5",
+    "globals": "^15.9.0",
+    "jsdom": "^25.0",
+    "npm-run-all": "^4.1",
+    "sass": "1.78.0",
+    "typescript": "~5.6.2",
+    "vite": "^5.4",
+    "vitest": "^2.0",
+    "vue-tsc": "^2.1"
+  }
+}

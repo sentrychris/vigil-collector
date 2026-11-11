@@ -1,0 +1,2343 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Vigil — Design & Branding Guide</title>
+    <meta
+      name="description"
+      content="The complete design system behind Vigil. Tokens, components, motion, and the recipes that make it feel like Vigil."
+    />
+    <meta name="theme-color" content="#0b1220" />
+
+    <link rel="icon" type="image/x-icon" href="favicon.ico" />
+    <link rel="icon" type="image/svg+xml" href="logo.svg" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@500;600;700&family=Lato:wght@200;300;400;700&family=Montserrat:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+
+    <style>
+      /* ═══════════════════════════════════════════════════════════════════
+         TOKENS — single source of truth. Dark-only.
+         ═══════════════════════════════════════════════════════════════════ */
+      :root {
+        /* Surfaces (dark) */
+        --bg-0: #060a14;
+        --bg-1: #0b1220;
+        --bg-2: #111827;
+        --bg-3: #1e293b;
+
+        /* Lines */
+        --line: rgba(96, 165, 250, 0.14);
+        --line-strong: rgba(96, 165, 250, 0.32);
+
+        /* Text */
+        --text: #f1f5f9;
+        --text-mute: #94a3b8;
+        --text-dim: #64748b;
+
+        /* Accents */
+        --blue:    #60a5fa;
+        --cyan:    #22d3ee;
+        --emerald: #34d399;
+        --purple:  #c084fc;
+        --amber:   #fbbf24;
+        --rose:    #f43f5e;
+        --fuchsia: #d946ef;
+
+        /* Type scale */
+        --fs-micro:   0.625rem;
+        --fs-caption: 0.75rem;
+        --fs-body:    0.875rem;
+        --fs-heading: 1rem;
+        --fs-display: 1.5rem;
+        --fs-hero:    1.875rem;
+
+        /* Radii */
+        --r-sm: 8px;
+        --r-md: 12px;
+        --r-lg: 18px;
+
+        --shadow-glass:
+          0 1px 0 rgba(255, 255, 255, 0.04) inset,
+          0 8px 24px -8px rgba(0, 0, 0, 0.55),
+          0 28px 56px -18px rgba(0, 0, 0, 0.6),
+          0 0 0 1px rgba(96, 165, 250, 0.05);
+        --shadow-drama:
+          0 30px 80px -20px rgba(2, 6, 23, 0.7),
+          0 0 0 1px rgba(96, 165, 250, 0.06) inset;
+
+        --header-grad: linear-gradient(135deg, #111827 0%, #1e293b 100%);
+
+        --page-bg: var(--bg-0);
+        --surface: var(--bg-1);
+        --elevated: var(--bg-3);
+      }
+
+      *, *::before, *::after { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+      body {
+        margin: 0;
+        font-family: "Lato", system-ui, sans-serif;
+        font-weight: 300;
+        font-size: 16px;
+        line-height: 1.6;
+        color: var(--text);
+        background: var(--page-bg);
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        overflow-x: hidden;
+        transition: background 280ms ease, color 280ms ease;
+      }
+
+      h1, h2, h3, h4 {
+        font-family: "IBM Plex Sans", system-ui, sans-serif;
+        font-weight: 600;
+        letter-spacing: -0.02em;
+        margin: 0;
+        color: var(--text);
+      }
+      a { color: inherit; text-decoration: none; }
+      code, kbd, pre {
+        font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
+
+      /* ═══════════════════════════════════════════════════════════════════
+         ATMOSPHERE — fixed behind everything, theme-aware.
+         ═══════════════════════════════════════════════════════════════════ */
+      .atmosphere {
+        position: fixed;
+        inset: 0;
+        z-index: -1;
+        pointer-events: none;
+        background: var(--page-bg);
+      }
+      .atmosphere::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background-image:
+          linear-gradient(rgba(96, 165, 250, 0.05) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(96, 165, 250, 0.05) 1px, transparent 1px);
+        background-size: 48px 48px;
+        mask-image: radial-gradient(ellipse at center top, black 30%, transparent 75%);
+        -webkit-mask-image: radial-gradient(ellipse at center top, black 30%, transparent 75%);
+        opacity: 0.55;
+      }
+      .atmosphere::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background:
+          radial-gradient(60vw 60vw at 12% -10%,  rgba(59, 130, 246, 0.22), transparent 60%),
+          radial-gradient(50vw 50vw at 100% 0%,   rgba(34, 211, 238, 0.18), transparent 60%),
+          radial-gradient(80vw 80vw at 50% 110%,  rgba(168, 85, 247, 0.12), transparent 60%);
+        animation: atmoShift 24s ease-in-out infinite alternate;
+      }
+      @keyframes atmoShift {
+        0%   { transform: translate3d(0, 0, 0); }
+        100% { transform: translate3d(0, -2%, 0); }
+      }
+
+      /* ═══════════════════════════════════════════════════════════════════
+         LAYOUT
+         ═══════════════════════════════════════════════════════════════════ */
+      .wrap { width: min(1180px, 92%); margin: 0 auto; }
+
+      /* NAV ──────────────────────────────────────────────────────── */
+      .nav {
+        position: sticky; top: 0; z-index: 50;
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
+        background: linear-gradient(180deg, rgba(11, 18, 32, 0.85), rgba(11, 18, 32, 0.55));
+        border-bottom: 1px solid var(--line);
+      }
+      .nav-inner {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 0.9rem 0; gap: 1rem;
+      }
+      .brand {
+        display: inline-flex; align-items: center; gap: 0.7rem;
+        font-family: "IBM Plex Sans", system-ui, sans-serif;
+      }
+      .brand-mark {
+        width: 38px; height: 38px; display: block;
+        filter: drop-shadow(0 4px 14px rgba(34, 211, 238, 0.35));
+        transition: filter 220ms ease, transform 320ms cubic-bezier(0.2, 0.8, 0.2, 1);
+      }
+      .brand-mark:hover {
+        filter: drop-shadow(0 8px 22px rgba(34, 211, 238, 0.55));
+        transform: translateY(-1px) rotate(-2deg);
+      }
+      .brand-name { font-weight: 700; font-size: 1.05rem; letter-spacing: -0.01em; }
+      .brand-pill {
+        margin-left: 0.4rem; padding: 0.18rem 0.45rem; border-radius: 999px;
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 0.65rem; font-weight: 500;
+        color: var(--cyan);
+        background: rgba(34, 211, 238, 0.08);
+        border: 1px solid rgba(34, 211, 238, 0.25);
+        letter-spacing: 0.06em;
+      }
+
+      .nav-tools {
+        display: inline-flex; align-items: center; gap: 0.7rem;
+        font-family: "IBM Plex Sans", system-ui, sans-serif;
+      }
+      .nav-link {
+        font-size: 0.85rem; font-weight: 500; color: var(--text-mute);
+        letter-spacing: 0.01em; transition: color 160ms ease;
+      }
+      .nav-link:hover { color: var(--text); }
+      @media (max-width: 720px) { .nav-link { display: none; } }
+
+      /* TOC sidebar */
+      .layout {
+        display: grid;
+        grid-template-columns: 220px minmax(0, 1fr);
+        gap: 3rem;
+        padding: 3rem 0 6rem;
+      }
+      @media (max-width: 920px) { .layout { grid-template-columns: 1fr; gap: 2rem; padding: 2rem 0 4rem; } }
+      .toc {
+        position: sticky; top: 90px; align-self: start;
+        font-family: "IBM Plex Sans", system-ui, sans-serif;
+        font-size: 0.82rem;
+        max-height: calc(100vh - 110px);
+        overflow-y: auto;
+        padding-right: 0.5rem;
+      }
+      @media (max-width: 920px) { .toc { display: none; } }
+      .toc-eyebrow {
+        font-family: "IBM Plex Mono", monospace;
+        font-size: var(--fs-micro);
+        font-weight: 600;
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+        color: var(--text-dim);
+        margin-bottom: 0.7rem;
+      }
+      .toc ol { list-style: none; padding: 0; margin: 0; }
+      .toc li { line-height: 1.4; }
+      .toc a {
+        display: block; padding: 0.32rem 0.6rem;
+        border-left: 2px solid transparent;
+        color: var(--text-mute); font-weight: 500;
+        transition: color 160ms ease, border-color 160ms ease, background 160ms ease;
+        border-radius: 0 4px 4px 0;
+      }
+      .toc a:hover { color: var(--text); }
+      .toc a.active {
+        color: var(--cyan);
+        border-left-color: var(--cyan);
+        background: rgba(34, 211, 238, 0.06);
+      }
+
+      .content { min-width: 0; }
+
+      /* ═══════════════════════════════════════════════════════════════════
+         SECTION CHROME
+         ═══════════════════════════════════════════════════════════════════ */
+      .section { padding: 0 0 5rem; scroll-margin-top: 90px; }
+      .section-eyebrow {
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 0.72rem;
+        letter-spacing: 0.22em;
+        color: var(--cyan);
+        text-transform: uppercase;
+        margin-bottom: 0.5rem;
+      }
+      .section-title {
+        font-size: clamp(1.7rem, 3.2vw, 2.2rem);
+        letter-spacing: -0.02em;
+      }
+      .section-lede {
+        margin-top: 0.8rem; max-width: 720px;
+        color: var(--text-mute); font-weight: 300; font-size: 1rem;
+      }
+      .subsection-title {
+        margin-top: 2.4rem;
+        font-size: 1.1rem; font-weight: 600; letter-spacing: -0.005em;
+      }
+
+      /* HERO (this page) ─────────────────────────────────── */
+      .hero { padding: 4rem 0 3rem; }
+      .hero-eyebrow {
+        display: inline-flex; align-items: center; gap: 0.55rem;
+        padding: 0.35rem 0.75rem; border-radius: 999px;
+        background: rgba(52, 211, 153, 0.08);
+        border: 1px solid rgba(52, 211, 153, 0.28);
+        color: var(--emerald);
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 0.7rem; font-weight: 500; letter-spacing: 0.18em;
+      }
+      .hero-eyebrow .dot {
+        width: 7px; height: 7px; border-radius: 50%;
+        background: var(--emerald);
+        box-shadow: 0 0 10px var(--emerald);
+        animation: pulse 1.6s ease-in-out infinite;
+      }
+      @keyframes pulse {
+        0%, 100% { opacity: 1; transform: scale(1); }
+        50%      { opacity: 0.5; transform: scale(0.9); }
+      }
+      .hero h1 {
+        margin-top: 1.4rem;
+        font-size: clamp(2.2rem, 5vw, 3.6rem);
+        line-height: 1.05; letter-spacing: -0.03em; font-weight: 700;
+      }
+      .hero h1 .accent,
+      .accent-text {
+        background: linear-gradient(120deg, var(--cyan) 10%, var(--blue) 50%, var(--purple) 95%);
+        -webkit-background-clip: text;
+        background-clip: text;
+        -webkit-text-fill-color: transparent;
+      }
+      .hero p.lede {
+        margin-top: 1.2rem; max-width: 720px;
+        color: var(--text-mute); font-weight: 300; font-size: 1.1rem;
+      }
+      .hero-meta {
+        margin-top: 1.6rem; display: flex; gap: 1.6rem; flex-wrap: wrap;
+        color: var(--text-dim);
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 0.78rem; letter-spacing: 0.06em;
+      }
+      .hero-meta b { color: var(--text); font-weight: 500; margin-right: 0.4rem; }
+
+      /* ═══════════════════════════════════════════════════════════════════
+         BUTTON  (the brand's two variants)
+         ═══════════════════════════════════════════════════════════════════ */
+      .btn {
+        display: inline-flex; align-items: center; gap: 0.5rem;
+        padding: 0.55rem 1rem; border-radius: 999px;
+        font-family: "IBM Plex Sans", system-ui, sans-serif;
+        font-weight: 600; font-size: 0.85rem; letter-spacing: 0.02em;
+        cursor: pointer;
+        border: 1px solid var(--line-strong);
+        background: rgba(255, 255, 255, 0.03);
+        color: var(--text);
+        transition: transform 180ms ease, box-shadow 180ms ease,
+                    background 180ms ease, border-color 180ms ease;
+      }
+      .btn:hover {
+        transform: translateY(-1px);
+        background: rgba(255, 255, 255, 0.06);
+        border-color: rgba(96, 165, 250, 0.5);
+      }
+      .btn-primary {
+        background: linear-gradient(135deg, var(--blue), var(--cyan));
+        border-color: transparent;
+        color: #0b1220;
+        box-shadow:
+          0 12px 30px -12px rgba(34, 211, 238, 0.55),
+          inset 0 0 0 1px rgba(255, 255, 255, 0.25);
+      }
+      .btn-primary:hover {
+        box-shadow:
+          0 16px 40px -12px rgba(34, 211, 238, 0.7),
+          inset 0 0 0 1px rgba(255, 255, 255, 0.35);
+      }
+      .btn .ico { width: 16px; height: 16px; }
+
+      /* ═══════════════════════════════════════════════════════════════════
+         PANEL CARD — the workhorse content surface used in every demo.
+         ═══════════════════════════════════════════════════════════════════ */
+      .panel {
+        border-radius: 14px;
+        background: rgba(15, 23, 42, 0.55);
+        border: 1px solid rgba(148, 163, 184, 0.14);
+        box-shadow: var(--shadow-glass);
+        backdrop-filter: blur(18px) saturate(140%);
+        -webkit-backdrop-filter: blur(18px) saturate(140%);
+        overflow: hidden;
+        transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
+      }
+      .panel:hover {
+        transform: translateY(-2px);
+        border-color: rgba(96, 165, 250, 0.28);
+      }
+      .panel-body { padding: 0.95rem 1rem 1rem; }
+      .panel-title-row {
+        display: flex; align-items: center; gap: 0.7rem;
+        padding-bottom: 0.7rem;
+        margin-bottom: 0.7rem;
+        border-bottom: 1px solid var(--line);
+      }
+      .panel-title {
+        font-family: "IBM Plex Sans", system-ui, sans-serif;
+        font-size: 0.78rem;
+        font-weight: 600;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--text);
+      }
+
+      /* SECTION HEADER (the recipe) ─────────────────────────── */
+      .section-header {
+        position: relative;
+        display: flex;
+        align-items: center; justify-content: space-between;
+        padding: 0.6rem 1rem;
+        background: var(--header-grad);
+        color: #f1f5f9;
+        overflow: hidden;
+        border-bottom: 1px solid rgba(96, 165, 250, 0.22);
+      }
+      .section-header::before {
+        content: "";
+        position: absolute; inset: 0;
+        background-image:
+          linear-gradient(rgba(96, 165, 250, 0.04) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(96, 165, 250, 0.04) 1px, transparent 1px);
+        background-size: 32px 32px;
+        opacity: 0.6;
+        pointer-events: none;
+      }
+      .section-header::after {
+        content: "";
+        position: absolute; inset: 0;
+        background:
+          radial-gradient(800px circle at 0% 0%, rgba(59, 130, 246, 0.14), transparent 50%),
+          radial-gradient(600px circle at 100% 100%, rgba(34, 211, 238, 0.08), transparent 50%);
+        pointer-events: none;
+      }
+      .section-header > * { position: relative; z-index: 1; }
+      .sh-left { display: inline-flex; align-items: center; gap: 0.7rem; }
+      .sh-icon {
+        width: 30px; height: 30px; border-radius: 8px;
+        display: inline-flex; align-items: center; justify-content: center;
+        font-size: 14px; flex-shrink: 0;
+      }
+      .sh-title {
+        font-family: "IBM Plex Sans", system-ui, sans-serif;
+        font-weight: 600;
+        font-size: var(--fs-body);
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        line-height: 1.15;
+        color: #f1f5f9;
+      }
+      .sh-sub {
+        font-family: "IBM Plex Mono", monospace;
+        font-size: var(--fs-micro);
+        color: #9ca3af;
+        letter-spacing: 0.08em;
+        margin-top: 2px;
+        text-transform: uppercase;
+      }
+
+      /* TONE TILES (icon recipe) ──────────────────────────── */
+      .tile {
+        display: inline-flex; align-items: center; justify-content: center;
+        flex-shrink: 0;
+      }
+      .tile.tone-blue    { background: rgba(59,130,246,0.15);  color: #60a5fa; box-shadow: inset 0 0 0 1px rgba(59,130,246,0.25); }
+      .tile.tone-cyan    { background: rgba(34,211,238,0.15);  color: #22d3ee; box-shadow: inset 0 0 0 1px rgba(34,211,238,0.25); }
+      .tile.tone-emerald { background: rgba(16,185,129,0.15);  color: #34d399; box-shadow: inset 0 0 0 1px rgba(16,185,129,0.25); }
+      .tile.tone-purple  { background: rgba(168,85,247,0.15);  color: #c084fc; box-shadow: inset 0 0 0 1px rgba(168,85,247,0.25); }
+      .tile.tone-amber   { background: rgba(245,158,11,0.15);  color: #fbbf24; box-shadow: inset 0 0 0 1px rgba(245,158,11,0.25); }
+      .tile.tone-rose    { background: rgba(239,68,68,0.15);   color: #f87171; box-shadow: inset 0 0 0 1px rgba(239,68,68,0.25); }
+      .tile.tone-slate   { background: rgba(148,163,184,0.12); color: #cbd5e1; box-shadow: inset 0 0 0 1px rgba(148,163,184,0.2); }
+      .tile-sm { width: 24px; height: 24px; border-radius: 6px; font-size: 11px; }
+      .tile-md { width: 30px; height: 30px; border-radius: 8px; font-size: 14px; }
+      .tile-lg { width: 38px; height: 38px; border-radius: 10px; font-size: 16px; }
+
+      /* ═══════════════════════════════════════════════════════════════════
+         SWATCH GRID (color tokens)
+         ═══════════════════════════════════════════════════════════════════ */
+      .swatch-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+        gap: 0.7rem;
+        margin-top: 1.2rem;
+      }
+      .swatch {
+        position: relative;
+        border-radius: var(--r-md);
+        border: 1px solid var(--line);
+        overflow: hidden;
+        cursor: pointer;
+        background: var(--surface);
+        transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+      }
+      .swatch:hover {
+        transform: translateY(-2px);
+        border-color: var(--line-strong);
+        box-shadow: 0 8px 24px -8px rgba(0, 0, 0, 0.5);
+      }
+      .swatch-chip {
+        height: 70px;
+        position: relative;
+        background: var(--swatch-color, #000);
+      }
+      .swatch-chip.checker {
+        background-image:
+          var(--swatch-color, transparent),
+          linear-gradient(45deg, rgba(255,255,255,0.06) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.06) 75%),
+          linear-gradient(45deg, rgba(255,255,255,0.06) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.06) 75%);
+        background-size: auto, 14px 14px, 14px 14px;
+        background-position: 0 0, 0 0, 7px 7px;
+      }
+      .swatch-meta {
+        padding: 0.5rem 0.7rem 0.55rem;
+        border-top: 1px solid var(--line);
+      }
+      .swatch-name {
+        font-family: "IBM Plex Sans", system-ui, sans-serif;
+        font-weight: 600; font-size: 0.78rem;
+        color: var(--text); letter-spacing: 0.02em;
+      }
+      .swatch-value {
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 0.7rem; color: var(--text-mute);
+        margin-top: 2px;
+      }
+
+      .copy-toast {
+        position: fixed; bottom: 24px; left: 50%;
+        transform: translateX(-50%) translateY(20px);
+        padding: 0.55rem 1rem;
+        border-radius: 999px;
+        background: rgba(15, 23, 42, 0.92);
+        border: 1px solid var(--line-strong);
+        color: var(--text);
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 0.78rem;
+        letter-spacing: 0.06em;
+        box-shadow: 0 16px 40px -12px rgba(2, 6, 23, 0.7);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 220ms ease, transform 220ms ease;
+        z-index: 100;
+      }
+      .copy-toast.show {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+      }
+      .copy-toast .check { color: var(--emerald); margin-right: 0.4rem; }
+
+      /* ═══════════════════════════════════════════════════════════════════
+         CHIPS, PILLS, EYEBROW
+         ═══════════════════════════════════════════════════════════════════ */
+      .chip {
+        display: inline-flex; align-items: center; gap: 0.45rem;
+        padding: 0.32rem 0.7rem;
+        border-radius: 6px;
+        font-family: "IBM Plex Mono", monospace;
+        font-size: var(--fs-micro);
+        font-weight: 700;
+        letter-spacing: 0.16em;
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        white-space: nowrap;
+        text-transform: uppercase;
+      }
+      .chip-dot {
+        width: 7px; height: 7px; border-radius: 50%;
+        background: currentColor;
+        box-shadow: 0 0 10px currentColor;
+      }
+      .chip.live { color: var(--emerald); }
+      .chip.live .chip-dot { animation: pulse 1.4s ease-in-out infinite; }
+      .chip.idle { color: var(--amber); }
+      .chip.crit { color: #f87171; }
+      .chip.info { color: var(--blue); }
+
+      .pill {
+        display: inline-flex; align-items: center;
+        padding: 0.45rem 0.9rem;
+        border-radius: 999px;
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 0.74rem;
+        letter-spacing: 0.06em;
+        color: var(--text);
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid var(--line);
+      }
+
+      .eyebrow {
+        font-family: "IBM Plex Mono", monospace;
+        font-size: var(--fs-micro);
+        font-weight: 700;
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+        color: var(--text-dim);
+      }
+      .eyebrow.eyebrow-accent { color: var(--cyan); }
+
+      /* ═══════════════════════════════════════════════════════════════════
+         CODE / TERMINAL BLOCK
+         ═══════════════════════════════════════════════════════════════════ */
+      .terminal {
+        margin-top: 1rem;
+        border-radius: var(--r-md);
+        overflow: hidden;
+        background: #0a0e18;
+        border: 1px solid var(--line-strong);
+        box-shadow: var(--shadow-drama);
+      }
+      .term-bar {
+        display: flex; align-items: center; gap: 0.55rem;
+        padding: 0.55rem 0.9rem;
+        background: rgba(255, 255, 255, 0.03);
+        border-bottom: 1px solid var(--line);
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 0.7rem; color: #64748b;
+        letter-spacing: 0.08em;
+      }
+      .term-dot { width: 10px; height: 10px; border-radius: 50%; background: rgba(255,255,255,0.18); }
+      .term-dot.r { background: rgba(244, 63, 94, 0.5); }
+      .term-dot.y { background: rgba(251, 191, 36, 0.5); }
+      .term-dot.g { background: rgba(52, 211, 153, 0.5); }
+      .term-bar .label { margin-left: 0.5rem; }
+      .terminal pre {
+        margin: 0;
+        padding: 1.2rem 1.3rem;
+        font-size: 0.82rem;
+        line-height: 1.7;
+        color: #cbd5e1;
+        overflow-x: auto;
+        white-space: pre;
+      }
+      .term-prompt  { color: var(--cyan); }
+      .term-cmd     { color: #f1f5f9; }
+      .term-flag    { color: var(--amber); }
+      .term-string  { color: var(--emerald); }
+      .term-comment { color: #64748b; font-style: italic; }
+      .term-prop    { color: var(--purple); }
+      .term-num     { color: var(--amber); }
+      .term-key     { color: var(--blue); }
+      .term-tag     { color: #f87171; }
+
+      /* Inline code */
+      code.inline {
+        padding: 0.1rem 0.4rem;
+        border-radius: 4px;
+        background: rgba(96, 165, 250, 0.08);
+        border: 1px solid rgba(96, 165, 250, 0.16);
+        color: var(--cyan);
+        font-size: 0.82em;
+      }
+
+      /* Always-dark code chip — used in the term-coloring callout where the
+         meaning (cyan / amber / emerald / etc.) is the literal terminal palette
+         and must read on a dark background regardless of theme. */
+      code.term-chip {
+        padding: 0.1rem 0.45rem;
+        border-radius: 4px;
+        background: #0a0e18;
+        border: 1px solid rgba(96, 165, 250, 0.18);
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 0.82em;
+      }
+
+      /* ═══════════════════════════════════════════════════════════════════
+         TYPOGRAPHY DEMOS
+         ═══════════════════════════════════════════════════════════════════ */
+      .type-row {
+        display: grid;
+        grid-template-columns: 110px 1fr 130px;
+        gap: 1rem;
+        padding: 0.9rem 1rem;
+        border-bottom: 1px solid var(--line);
+        align-items: baseline;
+      }
+      .type-row:last-child { border-bottom: 0; }
+      .type-token {
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 0.72rem; color: var(--text-mute);
+        letter-spacing: 0.04em;
+      }
+      .type-sample { color: var(--text); }
+      .type-desc {
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 0.7rem;
+        color: var(--text-dim);
+        text-align: right;
+      }
+
+      .ts-micro    { font-size: 0.625rem; }
+      .ts-caption  { font-size: 0.75rem; }
+      .ts-body     { font-size: 0.875rem; }
+      .ts-heading  { font-size: 1rem; font-family: "IBM Plex Sans", system-ui, sans-serif; font-weight: 600; }
+      .ts-display  { font-size: 1.5rem; font-family: "IBM Plex Sans", system-ui, sans-serif; font-weight: 600; letter-spacing: -0.01em; }
+      .ts-hero     { font-size: 1.875rem; font-family: "IBM Plex Sans", system-ui, sans-serif; font-weight: 700; letter-spacing: -0.02em; }
+
+      .metric-num {
+        font-family: "Montserrat", "IBM Plex Mono", monospace;
+        font-feature-settings: "tnum";
+        font-variant-numeric: tabular-nums;
+        letter-spacing: 0.01em;
+      }
+
+      /* ═══════════════════════════════════════════════════════════════════
+         GRIDS
+         ═══════════════════════════════════════════════════════════════════ */
+      .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+      .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+      .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.7rem; }
+      @media (max-width: 720px) {
+        .grid-2, .grid-3 { grid-template-columns: 1fr; }
+        .grid-4 { grid-template-columns: repeat(2, 1fr); }
+      }
+
+      .demo-row {
+        display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center;
+        margin-top: 1rem;
+      }
+
+      /* ═══════════════════════════════════════════════════════════════════
+         TOGGLE SWITCH (the brand pattern)
+         ═══════════════════════════════════════════════════════════════════ */
+      .toggle {
+        position: relative; display: inline-flex; align-items: center;
+        cursor: pointer; margin: 0;
+      }
+      .toggle input { position: absolute; opacity: 0; pointer-events: none; }
+      .toggle-track {
+        position: relative; display: inline-flex; align-items: center;
+        justify-content: space-between;
+        width: 50px; height: 24px;
+        padding: 0 6px; border-radius: 999px;
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        transition: background 0.2s ease, border-color 0.2s ease;
+      }
+      .toggle:hover .toggle-track {
+        background: rgba(255, 255, 255, 0.1);
+        border-color: rgba(255, 255, 255, 0.18);
+      }
+      .toggle-icon {
+        font-size: var(--fs-micro);
+        z-index: 1;
+        font-family: system-ui, sans-serif;
+        line-height: 1;
+        transition: color 0.2s ease;
+      }
+      .toggle-icon.left  { color: #fbbf24; }
+      .toggle-icon.right { color: #94a3b8; }
+      .toggle-thumb {
+        position: absolute;
+        top: 2px; left: 2px;
+        width: 18px; height: 18px;
+        background: #f9fafb;
+        border-radius: 50%;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+        transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+      }
+      .toggle input:checked ~ .toggle-track .toggle-thumb { transform: translateX(26px); }
+      .toggle input:checked ~ .toggle-track .toggle-icon.left  { color: #6b7280; }
+      .toggle input:checked ~ .toggle-track .toggle-icon.right { color: var(--purple); }
+
+      /* ═══════════════════════════════════════════════════════════════════
+         STAT CARD DEMO
+         ═══════════════════════════════════════════════════════════════════ */
+      .stat-card {
+        border-radius: 14px;
+        border: 1px solid rgba(148, 163, 184, 0.14);
+        background: rgba(15, 23, 42, 0.55);
+        box-shadow: var(--shadow-glass);
+        backdrop-filter: blur(18px) saturate(140%);
+        -webkit-backdrop-filter: blur(18px) saturate(140%);
+        overflow: hidden;
+        display: flex; flex-direction: column;
+        transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
+      }
+      .stat-card:hover {
+        transform: translateY(-2px);
+        border-color: rgba(96, 165, 250, 0.28);
+      }
+      .stat-card .section-header { padding: 0.55rem 0.9rem; }
+      .stat-card .stat-body {
+        padding: 0.85rem 0.95rem 1rem;
+        background: var(--bg-1);
+        flex: 1;
+      }
+      .stat-num {
+        font-family: "Montserrat", "IBM Plex Mono", monospace;
+        font-feature-settings: "tnum";
+        font-variant-numeric: tabular-nums;
+        font-size: 1.875rem;
+        font-weight: 300;
+        line-height: 1.1;
+        color: var(--text);
+        letter-spacing: 0.01em;
+      }
+      .stat-num .unit { font-size: 1rem; color: var(--text-mute); margin-left: 0.25rem; }
+      .stat-row {
+        display: flex; justify-content: space-between;
+        font-size: 0.8rem; color: var(--text-mute);
+        margin-top: 0.5rem;
+      }
+      .stat-row b { color: var(--text); font-family: "IBM Plex Mono", monospace; font-weight: 500; }
+
+      /* Bar */
+      .bar {
+        height: 6px; border-radius: 999px; overflow: hidden;
+        background: rgba(148, 163, 184, 0.14);
+        margin-top: 0.7rem;
+      }
+      .bar > span {
+        display: block; height: 100%; border-radius: inherit;
+        background: linear-gradient(90deg, var(--blue), var(--cyan));
+        transition: width 380ms cubic-bezier(.2,.8,.2,1);
+      }
+
+      /* ═══════════════════════════════════════════════════════════════════
+         BROWSER FRAME (mini, used in demos)
+         ═══════════════════════════════════════════════════════════════════ */
+      .browser {
+        position: relative;
+        border-radius: var(--r-md);
+        overflow: hidden;
+        background: var(--bg-1);
+        border: 1px solid var(--line-strong);
+        box-shadow: var(--shadow-drama);
+        margin-top: 1rem;
+      }
+      .browser-bar {
+        display: flex; align-items: center; gap: 0.55rem;
+        padding: 0.55rem 0.9rem;
+        background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.01));
+        border-bottom: 1px solid var(--line);
+      }
+      .browser-url {
+        margin-left: 0.7rem; flex: 1;
+        padding: 0.25rem 0.65rem;
+        border-radius: 6px;
+        background: rgba(255,255,255,0.04);
+        color: var(--text-mute);
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 0.7rem;
+        letter-spacing: 0.04em;
+      }
+      .browser-url .lock { color: var(--emerald); margin-right: 0.4rem; }
+      .browser-body { padding: 1.4rem; }
+
+      /* ═══════════════════════════════════════════════════════════════════
+         ARCHITECTURE NODES
+         ═══════════════════════════════════════════════════════════════════ */
+      .arch {
+        display: grid;
+        grid-template-columns: 1fr auto 1fr;
+        gap: 1rem; align-items: stretch;
+        margin-top: 1rem;
+      }
+      @media (max-width: 720px) {
+        .arch { grid-template-columns: 1fr; }
+        .arch-arrow { transform: rotate(90deg); }
+      }
+      .arch-node {
+        padding: 1.3rem 1.2rem;
+        border-radius: var(--r-md);
+        background: linear-gradient(180deg, rgba(255,255,255,0.025), rgba(255,255,255,0.01));
+        border: 1px solid var(--line);
+      }
+      .arch-tag {
+        display: inline-block;
+        margin-bottom: 0.6rem;
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 0.66rem;
+        letter-spacing: 0.18em;
+        color: var(--text-dim);
+        text-transform: uppercase;
+      }
+      .arch-node h4 { font-size: 1.05rem; font-weight: 600; }
+      .arch-node ul { margin: 0.7rem 0 0; padding: 0; list-style: none; }
+      .arch-node li {
+        padding: 0.28rem 0;
+        font-size: 0.85rem;
+        font-weight: 300;
+        display: flex; align-items: center; gap: 0.5rem;
+      }
+      .arch-node li::before {
+        content: "";
+        width: 5px; height: 5px;
+        border-radius: 50%;
+        background: currentColor;
+        opacity: 0.5;
+      }
+      .arch-node.blue li  { color: var(--blue); }
+      .arch-node.cyan li  { color: var(--cyan); }
+      .arch-arrow {
+        align-self: center;
+        display: flex; flex-direction: column;
+        align-items: center; justify-content: center;
+        gap: 0.4rem; min-width: 60px;
+      }
+      .arch-arrow svg { color: var(--cyan); filter: drop-shadow(0 0 8px var(--cyan)); }
+      .arch-pulse {
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 0.62rem;
+        color: var(--cyan);
+        letter-spacing: 0.18em;
+      }
+
+      /* ═══════════════════════════════════════════════════════════════════
+         CHART (interactive realtime sparkline)
+         ═══════════════════════════════════════════════════════════════════ */
+      .chart-wrap {
+        display: flex;
+        flex-direction: column;
+      }
+      .chart-head {
+        display: flex; justify-content: space-between; align-items: baseline;
+        margin-bottom: 0.5rem;
+      }
+      .chart-label {
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 0.7rem; letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--text-dim);
+      }
+      .chart-value {
+        font-family: "Montserrat", monospace;
+        font-feature-settings: "tnum";
+        font-variant-numeric: tabular-nums;
+        font-size: 1.4rem; font-weight: 400;
+        color: var(--text);
+      }
+      .chart-svg { width: 100%; height: 80px; display: block; }
+
+      /* ═══════════════════════════════════════════════════════════════════
+         SHADOW SHOWCASE
+         ═══════════════════════════════════════════════════════════════════ */
+      .shadow-card {
+        padding: 1.5rem;
+        border-radius: var(--r-md);
+        background: var(--surface);
+        border: 1px solid var(--line);
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 0.78rem;
+        color: var(--text-mute);
+        text-align: center;
+        min-height: 110px;
+        display: flex; align-items: center; justify-content: center;
+      }
+      .shadow-glass { box-shadow: var(--shadow-glass); }
+      .shadow-drama { box-shadow: var(--shadow-drama); }
+      .shadow-cyan {
+        box-shadow:
+          var(--shadow-drama),
+          0 0 60px -10px rgba(34, 211, 238, 0.45);
+      }
+
+      /* RADII demo */
+      .radii-row {
+        display: flex; gap: 1rem; flex-wrap: wrap;
+        margin-top: 1rem;
+      }
+      .radii-tile {
+        width: 110px; height: 80px;
+        background: var(--header-grad);
+        border: 1px solid var(--line-strong);
+        display: flex; align-items: center; justify-content: center;
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 0.7rem; color: var(--cyan);
+        letter-spacing: 0.06em;
+      }
+
+      /* ═══════════════════════════════════════════════════════════════════
+         INFO BOX (tip / dont)
+         ═══════════════════════════════════════════════════════════════════ */
+      .callout {
+        margin-top: 1.5rem;
+        padding: 1rem 1.1rem 1rem 1.2rem;
+        border-radius: var(--r-md);
+        background: rgba(34, 211, 238, 0.06);
+        border-left: 3px solid var(--cyan);
+        font-size: 0.9rem;
+        color: var(--text-mute);
+      }
+      .callout.warn  { background: rgba(251, 191, 36, 0.06); border-left-color: var(--amber); }
+      .callout.dont  { background: rgba(244, 63, 94, 0.06);  border-left-color: var(--rose); }
+      .callout b { color: var(--text); font-weight: 600; }
+
+      /* ═══════════════════════════════════════════════════════════════════
+         RECIPE BLOCK — for showing a CSS recipe with a copy button.
+         ═══════════════════════════════════════════════════════════════════ */
+      .recipe {
+        position: relative;
+        margin-top: 1rem;
+      }
+      .recipe-copy {
+        position: absolute;
+        top: 8px; right: 8px;
+        z-index: 5;
+        padding: 0.3rem 0.6rem;
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid var(--line);
+        color: var(--text-mute);
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 0.7rem;
+        letter-spacing: 0.06em;
+        cursor: pointer;
+        transition: color 160ms ease, background 160ms ease, border-color 160ms ease;
+      }
+      .recipe-copy:hover {
+        color: var(--text);
+        background: rgba(255, 255, 255, 0.1);
+        border-color: var(--line-strong);
+      }
+      .recipe-copy.copied { color: var(--emerald); border-color: rgba(52, 211, 153, 0.3); }
+
+      /* footer */
+      footer {
+        padding: 3rem 0;
+        border-top: 1px solid var(--line);
+        margin-top: 4rem;
+      }
+      .foot-inner {
+        display: flex; align-items: center; justify-content: space-between;
+        flex-wrap: wrap; gap: 1rem;
+      }
+      .foot-meta {
+        display: flex; align-items: center; gap: 1.4rem;
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 0.74rem; color: var(--text-dim);
+        letter-spacing: 0.08em;
+      }
+      .foot-meta a { color: var(--text-mute); transition: color 160ms ease; }
+      .foot-meta a:hover { color: var(--text); }
+
+      /* Reduced motion */
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after {
+          animation-duration: 0.01ms !important;
+          animation-iteration-count: 1 !important;
+          transition-duration: 0.01ms !important;
+        }
+        .atmosphere::after { animation: none; }
+      }
+    </style>
+  </head>
+
+  <body>
+    <div class="atmosphere"></div>
+
+    <!-- ═══════════ NAV ═══════════ -->
+    <header class="nav">
+      <div class="wrap nav-inner">
+        <a href="#" class="brand" aria-label="Vigil">
+          <img class="brand-mark" src="logo.svg" alt="" aria-hidden="true" />
+          <span class="brand-name">Vigil</span>
+          <span class="brand-pill">DESIGN</span>
+        </a>
+        <div class="nav-tools">
+          <a class="nav-link" href="index.html">← Marketing</a>
+          <a class="nav-link" href="https://github.com/sentrychris/vigil" target="_blank" rel="noopener">GitHub</a>
+        </div>
+      </div>
+    </header>
+
+    <!-- ═══════════ HERO ═══════════ -->
+    <section class="hero">
+      <div class="wrap">
+        <span class="hero-eyebrow"><span class="dot"></span> THE VIGIL DESIGN LANGUAGE</span>
+        <h1>Built for <span class="accent">at-a-glance clarity.</span></h1>
+        <p class="lede">
+          The complete recipe behind Vigil — every token, every component,
+          every motion gate. Click any swatch or recipe to copy. Toggle the
+          theme to see how surfaces flex. Everything below is rendered with
+          the same CSS you can lift wholesale.
+        </p>
+        <div class="hero-meta">
+          <span><b>Tokens</b> 28 colors · 6 type steps · 3 radii</span>
+          <span><b>Surfaces</b> dark-first</span>
+          <span><b>Stack</b> framework-agnostic CSS</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══════════ MAIN LAYOUT ═══════════ -->
+    <div class="wrap layout">
+      <!-- TOC ────────────────────────── -->
+      <aside class="toc" aria-label="Sections">
+        <div class="toc-eyebrow">Contents</div>
+        <ol id="toc-list">
+          <li><a href="#brand">01 · Brand at a glance</a></li>
+          <li><a href="#mark">02 · The mark</a></li>
+          <li><a href="#color">03 · Color system</a></li>
+          <li><a href="#typography">04 · Typography</a></li>
+          <li><a href="#scale">05 · Spacing & radii</a></li>
+          <li><a href="#elevation">06 · Elevation</a></li>
+          <li><a href="#atmosphere">07 · Atmosphere</a></li>
+          <li><a href="#icons">08 · Iconography</a></li>
+          <li><a href="#components">09 · Components</a></li>
+          <li><a href="#charts">10 · Data viz</a></li>
+          <li><a href="#motion">11 · Motion</a></li>
+          <li><a href="#minimum">12 · Minimum identity</a></li>
+        </ol>
+      </aside>
+
+      <!-- CONTENT ────────────────────── -->
+      <main class="content">
+
+        <!-- 01 BRAND ─────────────────── -->
+        <section class="section" id="brand">
+          <div class="section-eyebrow">01 · Brand</div>
+          <h2 class="section-title">Three sensibilities, one feel.</h2>
+          <p class="section-lede">
+            If a single phrase had to capture Vigil, it's <b>"glass over a
+            dark control room."</b> Surfaces are translucent, the chrome
+            behind them is gridded and dimly lit, and accent color appears
+            only on things that matter: status, headings, primary actions,
+            live data.
+          </p>
+
+          <div class="grid-3" style="margin-top: 1.5rem;">
+            <div class="panel"><div class="panel-body">
+              <span class="eyebrow">Sensibility 01</span>
+              <h3 style="margin-top: 0.4rem; font-size: 1.1rem;">SOC / NOC</h3>
+              <p style="color: var(--text-mute); font-size: 0.9rem; margin-top: 0.4rem;">
+                Dense numeric readouts, mono digits, status chips, an always-on LIVE pulse, gridlined surfaces.
+              </p>
+            </div></div>
+            <div class="panel"><div class="panel-body">
+              <span class="eyebrow">Sensibility 02</span>
+              <h3 style="margin-top: 0.4rem; font-size: 1.1rem;">Editorial</h3>
+              <p style="color: var(--text-mute); font-size: 0.9rem; margin-top: 0.4rem;">
+                Generous letter-spacing on small caps, restrained type scale, lots of negative space.
+              </p>
+            </div></div>
+            <div class="panel"><div class="panel-body">
+              <span class="eyebrow">Sensibility 03</span>
+              <h3 style="margin-top: 0.4rem; font-size: 1.1rem;">Holographic</h3>
+              <p style="color: var(--text-mute); font-size: 0.9rem; margin-top: 0.4rem;">
+                Soft radial glows, gradient text, prismatic sheen, glassy panels with backdrop blur.
+              </p>
+            </div></div>
+          </div>
+
+          <h3 class="subsection-title">Voice & tone</h3>
+          <ul style="color: var(--text-mute); font-size: 0.95rem; line-height: 1.85; padding-left: 1.2rem;">
+            <li><b style="color: var(--text);">Plain, technical, confident.</b> "Live WebSocket streaming." Not "Power up your monitoring journey."</li>
+            <li><b style="color: var(--text);">Numbers over adjectives.</b> "~140 KB gzipped" beats "blazingly fast."</li>
+            <li><b style="color: var(--text);">No exclamation marks. No emoji in product UI.</b></li>
+            <li><b style="color: var(--text);">Operator-friendly.</b> Copy assumes a reader who reads logs.</li>
+          </ul>
+        </section>
+
+        <!-- 02 MARK ──────────────────── -->
+        <section class="section" id="mark">
+          <div class="section-eyebrow">02 · Mark</div>
+          <h2 class="section-title">The Vigil cube-stack.</h2>
+          <p class="section-lede">
+            An isometric V built from cubic blocks. The left arm is a single
+            smooth prism; the right arm is a stack of three cubes with a 25°
+            twist on the top block. Both arms meet on a cyan apex — the
+            literal point of the V, and the brand's hero color.
+          </p>
+
+          <div class="panel" style="margin-top: 1.5rem;">
+            <div class="panel-body" style="display: grid; grid-template-columns: auto 1fr; gap: 2rem; align-items: center;">
+              <img src="logo.svg" alt="Vigil mark" style="width: 160px; height: 160px; filter: drop-shadow(0 12px 40px rgba(34, 211, 238, 0.4));" />
+              <div>
+                <span class="eyebrow">Anatomy</span>
+                <ul style="color: var(--text-mute); font-size: 0.9rem; line-height: 1.85; padding-left: 1.2rem; margin-top: 0.6rem;">
+                  <li><b style="color: var(--cyan);">Apex cube</b> — cyan, the hero color and visual anchor.</li>
+                  <li><b style="color: #93c5fd;">Right base block</b> — blue / indigo, the foundation.</li>
+                  <li><b style="color: var(--purple);">Right middle block</b> — purple, secondary highlight.</li>
+                  <li><b style="color: var(--fuchsia);">Right top block (twisted ~25°)</b> — fuchsia → amber.</li>
+                  <li><b style="color: var(--emerald);">Smooth left arm</b> — cyan → emerald gradient along its length.</li>
+                  <li>Soft cyan→blue radial halo behind the mark.</li>
+                  <li>White rim highlights at 22% opacity for bevel readability.</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          <h3 class="subsection-title">Signature drop-shadow</h3>
+          <div class="recipe">
+            <button class="recipe-copy" data-copy="filter: drop-shadow(0 6px 18px rgba(34, 211, 238, 0.35));">Copy</button>
+            <div class="terminal">
+              <div class="term-bar">
+                <span class="term-dot r"></span><span class="term-dot y"></span><span class="term-dot g"></span>
+                <span class="label">brand-mark.css</span>
+              </div>
+<pre><span class="term-key">filter</span>: <span class="term-cmd">drop-shadow</span>(<span class="term-num">0</span> <span class="term-num">6px</span> <span class="term-num">18px</span> <span class="term-string">rgba(34, 211, 238, 0.35)</span>);
+<span class="term-comment">/* On hover: intensify */</span>
+<span class="term-key">filter</span>: <span class="term-cmd">drop-shadow</span>(<span class="term-num">0</span> <span class="term-num">8px</span> <span class="term-num">22px</span> <span class="term-string">rgba(34, 211, 238, 0.55)</span>);</pre>
+            </div>
+          </div>
+
+          <div class="grid-2" style="margin-top: 1.5rem;">
+            <div class="callout">
+              <b>Do</b> — keep the gradient stack. Use the cyan halo on darker surfaces. Maintain ≥1 apex-cube of clear space on every side.
+            </div>
+            <div class="callout dont">
+              <b>Don't</b> — recolor the mark to a single tint, drop it on busy photographic backgrounds, or render flat without the halo on pure-white surfaces.
+            </div>
+          </div>
+        </section>
+
+        <!-- 03 COLOR ─────────────────── -->
+        <section class="section" id="color">
+          <div class="section-eyebrow">03 · Color</div>
+          <h2 class="section-title">A deep navy substrate, lit by accent LEDs.</h2>
+          <p class="section-lede">
+            Click any swatch to copy its value. The palette is built around a
+            dark substrate with a small set of luminous accents used like
+            indicator LEDs — never as backgrounds.
+          </p>
+
+          <h3 class="subsection-title">Surfaces (dark)</h3>
+          <div class="swatch-grid" data-swatches>
+            <div class="swatch" data-copy="#060a14"><div class="swatch-chip" style="--swatch-color: #060a14;"></div><div class="swatch-meta"><div class="swatch-name">--bg-0</div><div class="swatch-value">#060a14</div></div></div>
+            <div class="swatch" data-copy="#0b1220"><div class="swatch-chip" style="--swatch-color: #0b1220;"></div><div class="swatch-meta"><div class="swatch-name">--bg-1</div><div class="swatch-value">#0b1220</div></div></div>
+            <div class="swatch" data-copy="#0a0e17"><div class="swatch-chip" style="--swatch-color: #0a0e17;"></div><div class="swatch-meta"><div class="swatch-name">--bg-page</div><div class="swatch-value">#0a0e17</div></div></div>
+            <div class="swatch" data-copy="#0f172a"><div class="swatch-chip" style="--swatch-color: #0f172a;"></div><div class="swatch-meta"><div class="swatch-name">--bg-surface</div><div class="swatch-value">#0f172a</div></div></div>
+            <div class="swatch" data-copy="#111827"><div class="swatch-chip" style="--swatch-color: #111827;"></div><div class="swatch-meta"><div class="swatch-name">--bg-2</div><div class="swatch-value">#111827</div></div></div>
+            <div class="swatch" data-copy="#1e293b"><div class="swatch-chip" style="--swatch-color: #1e293b;"></div><div class="swatch-meta"><div class="swatch-name">--bg-3</div><div class="swatch-value">#1e293b</div></div></div>
+          </div>
+
+          <h3 class="subsection-title">Header gradient</h3>
+          <p style="color: var(--text-mute); font-size: 0.95rem; margin-top: 0.5rem;">
+            The canonical gradient — used by every navbar, footer, section header, and stat-card header.
+          </p>
+          <div class="recipe">
+            <button class="recipe-copy" data-copy="background: linear-gradient(135deg, #111827 0%, #1e293b 100%);">Copy</button>
+            <div class="panel" style="background: linear-gradient(135deg, #111827 0%, #1e293b 100%); border-color: rgba(96, 165, 250, 0.22); height: 100px; display: flex; align-items: center; justify-content: center; color: var(--cyan); font-family: 'IBM Plex Mono', monospace; font-size: 0.8rem; letter-spacing: 0.18em;">
+              linear-gradient(135deg, #111827, #1e293b)
+            </div>
+          </div>
+
+          <h3 class="subsection-title">Text scale</h3>
+          <div class="swatch-grid" data-swatches>
+            <div class="swatch" data-copy="#f1f5f9"><div class="swatch-chip" style="--swatch-color: #f1f5f9;"></div><div class="swatch-meta"><div class="swatch-name">--text-primary</div><div class="swatch-value">#f1f5f9</div></div></div>
+            <div class="swatch" data-copy="#cbd5e1"><div class="swatch-chip" style="--swatch-color: #cbd5e1;"></div><div class="swatch-meta"><div class="swatch-name">--text-secondary</div><div class="swatch-value">#cbd5e1</div></div></div>
+            <div class="swatch" data-copy="#94a3b8"><div class="swatch-chip" style="--swatch-color: #94a3b8;"></div><div class="swatch-meta"><div class="swatch-name">--text-muted</div><div class="swatch-value">#94a3b8</div></div></div>
+            <div class="swatch" data-copy="#64748b"><div class="swatch-chip" style="--swatch-color: #64748b;"></div><div class="swatch-meta"><div class="swatch-name">--text-dim</div><div class="swatch-value">#64748b</div></div></div>
+          </div>
+
+          <h3 class="subsection-title">Accent palette — the "indicator LEDs"</h3>
+          <p style="color: var(--text-mute); font-size: 0.95rem; margin-top: 0.5rem;">
+            Each accent has a primary, a secondary (used for stroke gradients), and a glow (used for shadow filters and chart effects).
+          </p>
+          <div class="swatch-grid" data-swatches>
+            <div class="swatch" data-copy="#60a5fa"><div class="swatch-chip" style="--swatch-color: #60a5fa;"></div><div class="swatch-meta"><div class="swatch-name">blue</div><div class="swatch-value">#60a5fa · info</div></div></div>
+            <div class="swatch" data-copy="#22d3ee"><div class="swatch-chip" style="--swatch-color: #22d3ee;"></div><div class="swatch-meta"><div class="swatch-name">cyan</div><div class="swatch-value">#22d3ee · hero</div></div></div>
+            <div class="swatch" data-copy="#34d399"><div class="swatch-chip" style="--swatch-color: #34d399;"></div><div class="swatch-meta"><div class="swatch-name">emerald</div><div class="swatch-value">#34d399 · ok / live</div></div></div>
+            <div class="swatch" data-copy="#c084fc"><div class="swatch-chip" style="--swatch-color: #c084fc;"></div><div class="swatch-meta"><div class="swatch-name">purple</div><div class="swatch-value">#c084fc · accent</div></div></div>
+            <div class="swatch" data-copy="#fbbf24"><div class="swatch-chip" style="--swatch-color: #fbbf24;"></div><div class="swatch-meta"><div class="swatch-name">amber</div><div class="swatch-value">#fbbf24 · warn</div></div></div>
+            <div class="swatch" data-copy="#f43f5e"><div class="swatch-chip" style="--swatch-color: #f43f5e;"></div><div class="swatch-meta"><div class="swatch-name">rose</div><div class="swatch-value">#f43f5e · critical</div></div></div>
+            <div class="swatch" data-copy="#d946ef"><div class="swatch-chip" style="--swatch-color: #d946ef;"></div><div class="swatch-meta"><div class="swatch-name">fuchsia</div><div class="swatch-value">#d946ef · decorative</div></div></div>
+          </div>
+
+          <div class="callout">
+            <b>The rules.</b> Saturated accents never appear as backgrounds — only at 10–15% opacity for tone tiles, ~22–28% for accent borders, and 100% on text / icons / strokes. No more than two accents per component (the hero gradient is the one exception). Pure black and pure white are not used.
+          </div>
+        </section>
+
+        <!-- 04 TYPOGRAPHY ────────────── -->
+        <section class="section" id="typography">
+          <div class="section-eyebrow">04 · Type</div>
+          <h2 class="section-title">Three families, three jobs.</h2>
+          <p class="section-lede">
+            <b style="color: var(--text);">IBM Plex Sans</b> for display and UI. <b style="color: var(--text);">Lato</b> for long-form body. <b style="color: var(--text);">IBM Plex Mono</b> for any number, code, or technical chip. Tabular figures are required everywhere a value can change in place.
+          </p>
+
+          <h3 class="subsection-title">Type scale</h3>
+          <div class="panel" style="margin-top: 1rem;">
+            <div class="type-row">
+              <div class="type-token">--fs-micro</div>
+              <div class="type-sample ts-micro">CHIPS · BADGES · EYEBROWS</div>
+              <div class="type-desc">10 px</div>
+            </div>
+            <div class="type-row">
+              <div class="type-token">--fs-caption</div>
+              <div class="type-sample ts-caption">Mono data rows / secondary labels</div>
+              <div class="type-desc">12 px</div>
+            </div>
+            <div class="type-row">
+              <div class="type-token">--fs-body</div>
+              <div class="type-sample ts-body">Primary body text and list-item names</div>
+              <div class="type-desc">14 px</div>
+            </div>
+            <div class="type-row">
+              <div class="type-token">--fs-heading</div>
+              <div class="type-sample ts-heading">Section / stat-card titles</div>
+              <div class="type-desc">16 px</div>
+            </div>
+            <div class="type-row">
+              <div class="type-token">--fs-display</div>
+              <div class="type-sample ts-display metric-num">42.81%</div>
+              <div class="type-desc">24 px</div>
+            </div>
+            <div class="type-row">
+              <div class="type-token">--fs-hero</div>
+              <div class="type-sample ts-hero metric-num">128.4 GB</div>
+              <div class="type-desc">30 px</div>
+            </div>
+          </div>
+
+          <h3 class="subsection-title">Letter-spacing as expression</h3>
+          <p style="color: var(--text-mute); font-size: 0.95rem; margin-top: 0.5rem;">
+            <b style="color: var(--text);">The smaller and more upper-case the text, the wider its tracking.</b> This is what gives the small mono labels their "control panel" feel.
+          </p>
+          <div class="panel" style="margin-top: 1rem;">
+            <div class="type-row">
+              <div class="type-token">-0.03em</div>
+              <div class="type-sample ts-hero" style="letter-spacing: -0.03em;">Hero display</div>
+              <div class="type-desc">tight</div>
+            </div>
+            <div class="type-row">
+              <div class="type-token">-0.02em</div>
+              <div class="type-sample ts-display" style="letter-spacing: -0.02em;">Section titles</div>
+              <div class="type-desc">tightish</div>
+            </div>
+            <div class="type-row">
+              <div class="type-token">+0.10em</div>
+              <div class="type-sample ts-body" style="letter-spacing: 0.10em; text-transform: uppercase; font-family: 'IBM Plex Sans', sans-serif; font-weight: 600;">Stat card titles</div>
+              <div class="type-desc">wide caps</div>
+            </div>
+            <div class="type-row">
+              <div class="type-token">+0.16em</div>
+              <div class="type-sample ts-micro" style="letter-spacing: 0.16em; text-transform: uppercase; font-family: 'IBM Plex Mono', monospace; font-weight: 700;">STATUS · LIVE</div>
+              <div class="type-desc">chip caps</div>
+            </div>
+            <div class="type-row">
+              <div class="type-token">+0.22em</div>
+              <div class="type-sample ts-micro" style="letter-spacing: 0.22em; text-transform: uppercase; font-family: 'IBM Plex Mono', monospace; font-weight: 700; color: var(--cyan);">SECTION EYEBROW</div>
+              <div class="type-desc">eyebrow caps</div>
+            </div>
+          </div>
+
+          <h3 class="subsection-title">The accent gradient text</h3>
+          <p style="color: var(--text-mute); font-size: 0.95rem; margin-top: 0.5rem;">
+            Used <b>once per page</b> on the hero key phrase. Repetition breaks its impact.
+          </p>
+          <div class="panel" style="margin-top: 1rem; padding: 2rem 1.5rem; text-align: center;">
+            <div style="font-family: 'IBM Plex Sans', sans-serif; font-size: 2.4rem; font-weight: 700; letter-spacing: -0.03em; line-height: 1.1;">
+              Real-time monitoring,<br />
+              <span class="accent-text">finally beautiful.</span>
+            </div>
+          </div>
+
+          <h3 class="subsection-title">Tabular figures (the rule)</h3>
+          <div class="grid-2" style="margin-top: 1rem;">
+            <div class="panel"><div class="panel-body">
+              <span class="eyebrow" style="color: var(--rose);">Without</span>
+              <div style="font-family: 'Montserrat', sans-serif; font-size: 1.5rem; margin-top: 0.5rem; color: var(--text-mute);">
+                <div>32.18 %</div>
+                <div>112.04 %</div>
+                <div>9.99 %</div>
+              </div>
+            </div></div>
+            <div class="panel"><div class="panel-body">
+              <span class="eyebrow" style="color: var(--emerald);">With tnum</span>
+              <div class="metric-num" style="font-size: 1.5rem; margin-top: 0.5rem;">
+                <div>32.18 %</div>
+                <div>112.04 %</div>
+                <div>9.99 %</div>
+              </div>
+            </div></div>
+          </div>
+        </section>
+
+        <!-- 05 SCALE ─────────────────── -->
+        <section class="section" id="scale">
+          <div class="section-eyebrow">05 · Scale</div>
+          <h2 class="section-title">Spacing & radii.</h2>
+          <p class="section-lede">
+            Three radii cover the whole system. Cards and chrome tighten on mobile — typically by 0.1–0.15 rem of horizontal padding and 2–4 px on icon tiles.
+          </p>
+
+          <div class="radii-row">
+            <div class="radii-tile" style="border-radius: 8px;">--r-sm · 8</div>
+            <div class="radii-tile" style="border-radius: 12px;">--r-md · 12</div>
+            <div class="radii-tile" style="border-radius: 14px;">panel · 14</div>
+            <div class="radii-tile" style="border-radius: 18px;">--r-lg · 18</div>
+            <div class="radii-tile" style="border-radius: 999px;">pill · 999</div>
+          </div>
+
+          <h3 class="subsection-title">Component padding cheatsheet</h3>
+          <div class="panel" style="margin-top: 1rem;">
+            <div class="type-row">
+              <div class="type-token">section-header</div>
+              <div class="type-sample"><code class="inline">0.6rem 1rem</code></div>
+              <div class="type-desc">tight</div>
+            </div>
+            <div class="type-row">
+              <div class="type-token">stat-card body</div>
+              <div class="type-sample"><code class="inline">0.7rem 0.95rem 0.85rem</code></div>
+              <div class="type-desc">snug</div>
+            </div>
+            <div class="type-row">
+              <div class="type-token">panel body</div>
+              <div class="type-sample"><code class="inline">0.85rem 1rem 0.95rem</code></div>
+              <div class="type-desc">comfy</div>
+            </div>
+            <div class="type-row">
+              <div class="type-token">button</div>
+              <div class="type-sample"><code class="inline">0.55rem 1rem</code></div>
+              <div class="type-desc">pill</div>
+            </div>
+            <div class="type-row">
+              <div class="type-token">chip / pill</div>
+              <div class="type-sample"><code class="inline">0.32rem 0.7rem · 0.45rem 0.9rem</code></div>
+              <div class="type-desc">small / med</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 06 ELEVATION ─────────────── -->
+        <section class="section" id="elevation">
+          <div class="section-eyebrow">06 · Elevation</div>
+          <h2 class="section-title">Two shadow recipes.</h2>
+          <p class="section-lede">
+            Use them. Don't invent new ones. Soft glass for content panels; dark drama for hero / marketing surfaces.
+          </p>
+
+          <div class="grid-3" style="margin-top: 1.5rem;">
+            <div class="shadow-card shadow-glass">soft glass</div>
+            <div class="shadow-card shadow-drama">dark drama</div>
+            <div class="shadow-card shadow-cyan">drama + cyan rim</div>
+          </div>
+
+          <h3 class="subsection-title">Soft glass (panels)</h3>
+          <div class="recipe">
+            <button class="recipe-copy" data-copy="box-shadow:
+  0 1px 0 rgba(255, 255, 255, 0.9) inset,
+  0 8px 24px -8px rgba(15, 23, 42, 0.18),
+  0 24px 48px -16px rgba(15, 23, 42, 0.18);">Copy</button>
+            <div class="terminal">
+              <div class="term-bar">
+                <span class="term-dot r"></span><span class="term-dot y"></span><span class="term-dot g"></span>
+                <span class="label">elevation.css</span>
+              </div>
+<pre><span class="term-comment">/* Light mode */</span>
+<span class="term-key">box-shadow</span>:
+  <span class="term-num">0</span> <span class="term-num">1px</span> <span class="term-num">0</span> <span class="term-string">rgba(255, 255, 255, 0.9)</span> inset,
+  <span class="term-num">0</span> <span class="term-num">8px</span> <span class="term-num">24px</span> <span class="term-num">-8px</span> <span class="term-string">rgba(15, 23, 42, 0.18)</span>,
+  <span class="term-num">0</span> <span class="term-num">24px</span> <span class="term-num">48px</span> <span class="term-num">-16px</span> <span class="term-string">rgba(15, 23, 42, 0.18)</span>;
+
+<span class="term-comment">/* Dark mode swaps inset highlight for a faint cyan glow */</span>
+<span class="term-key">box-shadow</span>:
+  <span class="term-num">0</span> <span class="term-num">1px</span> <span class="term-num">0</span> <span class="term-string">rgba(255, 255, 255, 0.04)</span> inset,
+  <span class="term-num">0</span> <span class="term-num">8px</span> <span class="term-num">24px</span> <span class="term-num">-8px</span> <span class="term-string">rgba(0, 0, 0, 0.55)</span>,
+  <span class="term-num">0</span> <span class="term-num">28px</span> <span class="term-num">56px</span> <span class="term-num">-18px</span> <span class="term-string">rgba(0, 0, 0, 0.6)</span>,
+  <span class="term-num">0</span> <span class="term-num">0</span> <span class="term-num">0</span> <span class="term-num">1px</span> <span class="term-string">rgba(96, 165, 250, 0.05)</span>;</pre>
+            </div>
+          </div>
+
+          <h3 class="subsection-title">Dark drama (browser frames, terminals)</h3>
+          <div class="recipe">
+            <button class="recipe-copy" data-copy="box-shadow:
+  0 30px 80px -20px rgba(2, 6, 23, 0.7),
+  0 0 0 1px rgba(96, 165, 250, 0.06) inset;">Copy</button>
+            <div class="terminal">
+              <div class="term-bar">
+                <span class="term-dot r"></span><span class="term-dot y"></span><span class="term-dot g"></span>
+                <span class="label">drama.css</span>
+              </div>
+<pre><span class="term-key">box-shadow</span>:
+  <span class="term-num">0</span> <span class="term-num">30px</span> <span class="term-num">80px</span> <span class="term-num">-20px</span> <span class="term-string">rgba(2, 6, 23, 0.7)</span>,
+  <span class="term-num">0</span> <span class="term-num">0</span> <span class="term-num">0</span> <span class="term-num">1px</span> <span class="term-string">rgba(96, 165, 250, 0.06)</span> inset;
+
+<span class="term-comment">/* Hover adds a cyan rim glow */</span>
+<span class="term-key">box-shadow</span>:
+  <span class="term-num">0</span> <span class="term-num">40px</span> <span class="term-num">100px</span> <span class="term-num">-20px</span> <span class="term-string">rgba(2, 6, 23, 0.85)</span>,
+  <span class="term-num">0</span> <span class="term-num">0</span> <span class="term-num">0</span> <span class="term-num">1px</span> <span class="term-string">rgba(96, 165, 250, 0.18)</span> inset,
+  <span class="term-num">0</span> <span class="term-num">0</span> <span class="term-num">60px</span> <span class="term-num">-10px</span> <span class="term-string">rgba(34, 211, 238, 0.45)</span>;</pre>
+            </div>
+          </div>
+        </section>
+
+        <!-- 07 ATMOSPHERE ────────────── -->
+        <section class="section" id="atmosphere">
+          <div class="section-eyebrow">07 · Atmosphere</div>
+          <h2 class="section-title">Three layers behind everything.</h2>
+          <p class="section-lede">
+            Every full-screen surface in the system carries an <b>atmosphere layer</b> — fixed to the viewport, behind everything, pointer-events none. It's what makes the brand feel like a place rather than a page.
+          </p>
+
+          <div class="grid-3" style="margin-top: 1.5rem;">
+            <div class="panel"><div class="panel-body">
+              <span class="eyebrow eyebrow-accent">Layer 01</span>
+              <h3 style="margin-top: 0.4rem; font-size: 1.05rem;">Header gradient</h3>
+              <p style="color: var(--text-mute); font-size: 0.85rem; margin-top: 0.4rem;"><code class="inline">linear-gradient(135deg, #111827, #1e293b)</code></p>
+            </div></div>
+            <div class="panel"><div class="panel-body">
+              <span class="eyebrow eyebrow-accent">Layer 02</span>
+              <h3 style="margin-top: 0.4rem; font-size: 1.05rem;">Grid overlay</h3>
+              <p style="color: var(--text-mute); font-size: 0.85rem; margin-top: 0.4rem;">Two crossed 1-px lines @ <code class="inline">rgba(96,165,250,0.04)</code>, 28–48 px tile, 0.5–0.6 opacity.</p>
+            </div></div>
+            <div class="panel"><div class="panel-body">
+              <span class="eyebrow eyebrow-accent">Layer 03</span>
+              <h3 style="margin-top: 0.4rem; font-size: 1.05rem;">Corner glows</h3>
+              <p style="color: var(--text-mute); font-size: 0.85rem; margin-top: 0.4rem;">Bright blue radial top-left, fainter cyan bottom-right.</p>
+            </div></div>
+          </div>
+
+          <h3 class="subsection-title">Live preview — the recipe stacked</h3>
+          <div class="section-header" style="border-radius: 14px; margin-top: 1rem; height: 200px;">
+            <div class="sh-left">
+              <div class="tile tile-md tone-cyan">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+              </div>
+              <div>
+                <div class="sh-title">The atmosphere</div>
+                <div class="sh-sub">GRADIENT · GRID · GLOWS</div>
+              </div>
+            </div>
+            <span class="chip live"><span class="chip-dot"></span>LIVE</span>
+          </div>
+
+          <h3 class="subsection-title">The full atmosphere recipe</h3>
+          <div class="recipe">
+            <button class="recipe-copy" data-copy="background:
+  radial-gradient(60vw 60vw at 12% -10%,  rgba(59, 130, 246, 0.22), transparent 60%),
+  radial-gradient(50vw 50vw at 100% 0%,   rgba(34, 211, 238, 0.18), transparent 60%),
+  radial-gradient(80vw 80vw at 50% 110%,  rgba(168, 85, 247, 0.12), transparent 60%);">Copy</button>
+            <div class="terminal">
+              <div class="term-bar">
+                <span class="term-dot r"></span><span class="term-dot y"></span><span class="term-dot g"></span>
+                <span class="label">atmosphere.css</span>
+              </div>
+<pre><span class="term-comment">/* Position fixed, z-index -1, pointer-events none */</span>
+.<span class="term-tag">atmosphere</span>::after {
+  <span class="term-key">background</span>:
+    <span class="term-cmd">radial-gradient</span>(<span class="term-num">60vw</span> <span class="term-num">60vw</span> at <span class="term-num">12%</span> <span class="term-num">-10%</span>,
+      <span class="term-string">rgba(59, 130, 246, 0.22)</span>, <span class="term-flag">transparent</span> <span class="term-num">60%</span>),
+    <span class="term-cmd">radial-gradient</span>(<span class="term-num">50vw</span> <span class="term-num">50vw</span> at <span class="term-num">100%</span> <span class="term-num">0%</span>,
+      <span class="term-string">rgba(34, 211, 238, 0.18)</span>, <span class="term-flag">transparent</span> <span class="term-num">60%</span>),
+    <span class="term-cmd">radial-gradient</span>(<span class="term-num">80vw</span> <span class="term-num">80vw</span> at <span class="term-num">50%</span> <span class="term-num">110%</span>,
+      <span class="term-string">rgba(168, 85, 247, 0.12)</span>, <span class="term-flag">transparent</span> <span class="term-num">60%</span>);
+  <span class="term-key">animation</span>: atmoShift <span class="term-num">24s</span> ease-in-out infinite alternate;
+}</pre>
+            </div>
+          </div>
+        </section>
+
+        <!-- 08 ICONS ─────────────────── -->
+        <section class="section" id="icons">
+          <div class="section-eyebrow">08 · Iconography</div>
+          <h2 class="section-title">Tone tiles.</h2>
+          <p class="section-lede">
+            Every icon sits inside a translucent tile of its own tone, ringed by a slightly stronger inset border. Six standard tones, plus a slate neutral for unclassified items. The same names recur on chart strokes and tone props across the brand.
+          </p>
+
+          <h3 class="subsection-title">Sizes</h3>
+          <div class="demo-row">
+            <div class="tile tile-sm tone-cyan">●</div>
+            <div class="tile tile-md tone-cyan">●</div>
+            <div class="tile tile-lg tone-cyan">●</div>
+            <span class="eyebrow" style="margin-left: 1rem;">24 · 30 · 38</span>
+          </div>
+
+          <h3 class="subsection-title">All tones</h3>
+          <div class="grid-4" style="margin-top: 1rem;">
+            <div class="panel"><div class="panel-body" style="text-align: center; padding: 1rem 0.5rem;">
+              <div class="tile tile-lg tone-blue" style="margin: 0 auto;">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+              </div>
+              <div class="eyebrow" style="margin-top: 0.7rem;">blue</div>
+            </div></div>
+            <div class="panel"><div class="panel-body" style="text-align: center; padding: 1rem 0.5rem;">
+              <div class="tile tile-lg tone-cyan" style="margin: 0 auto;">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+              </div>
+              <div class="eyebrow" style="margin-top: 0.7rem;">cyan</div>
+            </div></div>
+            <div class="panel"><div class="panel-body" style="text-align: center; padding: 1rem 0.5rem;">
+              <div class="tile tile-lg tone-emerald" style="margin: 0 auto;">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-7"/></svg>
+              </div>
+              <div class="eyebrow" style="margin-top: 0.7rem;">emerald</div>
+            </div></div>
+            <div class="panel"><div class="panel-body" style="text-align: center; padding: 1rem 0.5rem;">
+              <div class="tile tile-lg tone-purple" style="margin: 0 auto;">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>
+              </div>
+              <div class="eyebrow" style="margin-top: 0.7rem;">purple</div>
+            </div></div>
+            <div class="panel"><div class="panel-body" style="text-align: center; padding: 1rem 0.5rem;">
+              <div class="tile tile-lg tone-amber" style="margin: 0 auto;">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4M12 18v4M5 5l3 3M16 16l3 3M2 12h4M18 12h4M5 19l3-3M16 8l3-3"/><circle cx="12" cy="12" r="4"/></svg>
+              </div>
+              <div class="eyebrow" style="margin-top: 0.7rem;">amber</div>
+            </div></div>
+            <div class="panel"><div class="panel-body" style="text-align: center; padding: 1rem 0.5rem;">
+              <div class="tile tile-lg tone-rose" style="margin: 0 auto;">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+              </div>
+              <div class="eyebrow" style="margin-top: 0.7rem;">rose</div>
+            </div></div>
+            <div class="panel"><div class="panel-body" style="text-align: center; padding: 1rem 0.5rem;">
+              <div class="tile tile-lg tone-slate" style="margin: 0 auto;">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/></svg>
+              </div>
+              <div class="eyebrow" style="margin-top: 0.7rem;">slate</div>
+            </div></div>
+          </div>
+
+          <h3 class="subsection-title">Recipe</h3>
+          <div class="recipe">
+            <button class="recipe-copy" data-copy=".tile.tone-blue {
+  background:  rgba(59, 130, 246, 0.15);
+  color:       #60a5fa;
+  box-shadow:  inset 0 0 0 1px rgba(59, 130, 246, 0.28);
+}">Copy</button>
+            <div class="terminal">
+              <div class="term-bar">
+                <span class="term-dot r"></span><span class="term-dot y"></span><span class="term-dot g"></span>
+                <span class="label">tone-tile.css</span>
+              </div>
+<pre>.<span class="term-tag">tile</span> {
+  <span class="term-key">width</span>: <span class="term-num">30px</span>; <span class="term-key">height</span>: <span class="term-num">30px</span>;
+  <span class="term-key">border-radius</span>: <span class="term-num">8px</span>;
+  <span class="term-key">display</span>: inline-flex;
+  <span class="term-key">align-items</span>: center;
+  <span class="term-key">justify-content</span>: center;
+}
+.<span class="term-tag">tile</span>.<span class="term-tag">tone-blue</span> {
+  <span class="term-key">background</span>:  <span class="term-string">rgba(59, 130, 246, 0.15)</span>;
+  <span class="term-key">color</span>:       <span class="term-string">#60a5fa</span>;
+  <span class="term-key">box-shadow</span>:  inset <span class="term-num">0</span> <span class="term-num">0</span> <span class="term-num">0</span> <span class="term-num">1px</span>
+                <span class="term-string">rgba(59, 130, 246, 0.28)</span>;
+}</pre>
+            </div>
+          </div>
+        </section>
+
+        <!-- 09 COMPONENTS ────────────── -->
+        <section class="section" id="components">
+          <div class="section-eyebrow">09 · Components</div>
+          <h2 class="section-title">The library.</h2>
+          <p class="section-lede">
+            Every component below is described as a recipe — what it's made of, not what library renders it.
+          </p>
+
+          <!-- Section header -->
+          <h3 class="subsection-title">9.1 — Section header</h3>
+          <p style="color: var(--text-mute); font-size: 0.95rem; margin-top: 0.4rem;">
+            The dashboard's most recurring chrome element. Header gradient + grid overlay + corner glows + tone-tile icon + caps title.
+          </p>
+          <div style="border-radius: 12px; overflow: hidden; margin-top: 1rem; border: 1px solid rgba(96, 165, 250, 0.22);">
+            <div class="section-header">
+              <div class="sh-left">
+                <div class="tile tile-md tone-blue">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+                </div>
+                <div>
+                  <div class="sh-title">CPU usage</div>
+                  <div class="sh-sub">SAMPLED · 1HZ</div>
+                </div>
+              </div>
+              <span class="chip live"><span class="chip-dot"></span>LIVE</span>
+            </div>
+          </div>
+
+          <!-- Stat cards -->
+          <h3 class="subsection-title">9.2 — Stat cards (interactive)</h3>
+          <p style="color: var(--text-mute); font-size: 0.95rem; margin-top: 0.4rem;">
+            Toggle the tone or click the card to update its metric. Numbers use <code class="inline">tabular-nums</code>; bars animate on change.
+          </p>
+          <div class="demo-row">
+            <span class="eyebrow">Tone:</span>
+            <button class="btn tone-pick" data-tone="blue" style="padding: 0.4rem 0.8rem;">blue</button>
+            <button class="btn tone-pick" data-tone="cyan" style="padding: 0.4rem 0.8rem;">cyan</button>
+            <button class="btn tone-pick" data-tone="emerald" style="padding: 0.4rem 0.8rem;">emerald</button>
+            <button class="btn tone-pick" data-tone="purple" style="padding: 0.4rem 0.8rem;">purple</button>
+            <button class="btn tone-pick" data-tone="amber" style="padding: 0.4rem 0.8rem;">amber</button>
+            <button class="btn tone-pick" data-tone="rose" style="padding: 0.4rem 0.8rem;">rose</button>
+          </div>
+
+          <div class="grid-3" style="margin-top: 1rem;" id="stat-cards">
+            <div class="stat-card" data-stat="cpu">
+              <div class="section-header">
+                <div class="sh-left">
+                  <div class="tile tile-md tone-blue stat-tile">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9h6v6H9zM9 1v3M15 1v3M9 20v3M15 20v3M1 9h3M1 15h3M20 9h3M20 15h3"/></svg>
+                  </div>
+                  <div class="sh-title">CPU</div>
+                </div>
+                <span class="chip live"><span class="chip-dot"></span>LIVE</span>
+              </div>
+              <div class="stat-body">
+                <div class="stat-num"><span class="value">42.8</span><span class="unit">%</span></div>
+                <div class="bar"><span style="width: 42.8%;"></span></div>
+                <div class="stat-row"><span>load 1m</span><b>1.34</b></div>
+                <div class="stat-row"><span>cores</span><b>8</b></div>
+              </div>
+            </div>
+
+            <div class="stat-card" data-stat="mem">
+              <div class="section-header">
+                <div class="sh-left">
+                  <div class="tile tile-md tone-purple stat-tile">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="6" cy="12" r="1.5" fill="currentColor"/><circle cx="11" cy="12" r="1.5" fill="currentColor"/><circle cx="16" cy="12" r="1.5" fill="currentColor"/></svg>
+                  </div>
+                  <div class="sh-title">Memory</div>
+                </div>
+                <span class="chip live"><span class="chip-dot"></span>LIVE</span>
+              </div>
+              <div class="stat-body">
+                <div class="stat-num"><span class="value">12.4</span><span class="unit">GB</span></div>
+                <div class="bar"><span style="width: 64%;"></span></div>
+                <div class="stat-row"><span>used</span><b>12.4 / 32 GB</b></div>
+                <div class="stat-row"><span>cached</span><b>4.1 GB</b></div>
+              </div>
+            </div>
+
+            <div class="stat-card" data-stat="net">
+              <div class="section-header">
+                <div class="sh-left">
+                  <div class="tile tile-md tone-emerald stat-tile">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10M12 2a15.3 15.3 0 0 0-4 10 15.3 15.3 0 0 0 4 10"/></svg>
+                  </div>
+                  <div class="sh-title">Network</div>
+                </div>
+                <span class="chip live"><span class="chip-dot"></span>LIVE</span>
+              </div>
+              <div class="stat-body">
+                <div class="stat-num"><span class="value">28.1</span><span class="unit">MB/s</span></div>
+                <div class="bar"><span style="width: 36%;"></span></div>
+                <div class="stat-row"><span>↓ in</span><b>22.4 MB/s</b></div>
+                <div class="stat-row"><span>↑ out</span><b>5.7 MB/s</b></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Chips & pills -->
+          <h3 class="subsection-title">9.3 — Chips, pills, and the eyebrow</h3>
+          <div class="panel" style="margin-top: 1rem;">
+            <div class="panel-body">
+              <div class="eyebrow" style="margin-bottom: 0.8rem;">Status chips</div>
+              <div class="demo-row" style="margin-top: 0;">
+                <span class="chip live"><span class="chip-dot"></span>LIVE</span>
+                <span class="chip idle"><span class="chip-dot"></span>STATIC</span>
+                <span class="chip crit"><span class="chip-dot"></span>OFFLINE</span>
+                <span class="chip info"><span class="chip-dot"></span>QUEUED</span>
+              </div>
+
+              <div class="eyebrow" style="margin-top: 1.5rem; margin-bottom: 0.8rem;">Pills</div>
+              <div class="demo-row" style="margin-top: 0;">
+                <span class="pill">Vue 3</span>
+                <span class="pill">TypeScript</span>
+                <span class="pill">D3</span>
+                <span class="pill">Bootstrap 5</span>
+                <span class="pill">Sass</span>
+                <span class="pill">v1.0.0</span>
+              </div>
+
+              <div class="eyebrow" style="margin-top: 1.5rem; margin-bottom: 0.5rem;">Hero eyebrow</div>
+              <div style="margin-top: 0.4rem;">
+                <span class="hero-eyebrow"><span class="dot"></span> LIVE · 1Hz STREAMING</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Buttons -->
+          <h3 class="subsection-title">9.4 — Buttons</h3>
+          <p style="color: var(--text-mute); font-size: 0.95rem; margin-top: 0.4rem;">
+            <b style="color: var(--text);">Two variants only.</b> If something needs to feel more critical, change the iconography or add a status dot — don't recolor the button.
+          </p>
+          <div class="demo-row">
+            <a class="btn">
+              <svg class="ico" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.1.79-.25.79-.56v-2.16c-3.2.7-3.87-1.36-3.87-1.36-.52-1.34-1.28-1.69-1.28-1.69-1.05-.72.08-.71.08-.71 1.16.08 1.77 1.2 1.77 1.2 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.7 0-1.26.45-2.29 1.18-3.1-.12-.29-.51-1.46.11-3.05 0 0 .97-.31 3.18 1.18a11 11 0 0 1 5.78 0c2.21-1.49 3.18-1.18 3.18-1.18.62 1.59.23 2.76.11 3.05.74.81 1.18 1.84 1.18 3.1 0 4.43-2.69 5.41-5.25 5.69.41.36.78 1.06.78 2.13v3.16c0 .31.21.67.8.56A11.5 11.5 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5Z"/></svg>
+              GitHub
+            </a>
+            <a class="btn btn-primary">
+              <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              Live demo
+            </a>
+            <a class="btn">More</a>
+          </div>
+
+          <!-- Toggles -->
+          <h3 class="subsection-title">9.5 — Toggles</h3>
+          <div class="panel" style="margin-top: 1rem;"><div class="panel-body">
+            <div class="demo-row" style="margin-top: 0;">
+              <label class="toggle"><input type="checkbox" /><span class="toggle-track"><span class="toggle-icon left">☀</span><span class="toggle-icon right">☾</span><span class="toggle-thumb"></span></span></label>
+              <span class="eyebrow">theme</span>
+              <span style="display: inline-block; width: 1px; height: 18px; background: var(--line); margin: 0 0.5rem;"></span>
+              <label class="toggle"><input type="checkbox" checked /><span class="toggle-track"><span class="toggle-icon left">⚡</span><span class="toggle-icon right">⏸</span><span class="toggle-thumb"></span></span></label>
+              <span class="eyebrow">live ws</span>
+              <span style="display: inline-block; width: 1px; height: 18px; background: var(--line); margin: 0 0.5rem;"></span>
+              <label class="toggle"><input type="checkbox" /><span class="toggle-track"><span class="toggle-icon left">i</span><span class="toggle-icon right">⚙</span><span class="toggle-thumb"></span></span></label>
+              <span class="eyebrow">debug</span>
+            </div>
+          </div></div>
+
+          <!-- Browser frame -->
+          <h3 class="subsection-title">9.6 — Browser frame (marketing)</h3>
+          <div class="browser">
+            <div class="browser-bar">
+              <span class="term-dot r"></span><span class="term-dot y"></span><span class="term-dot g"></span>
+              <span class="browser-url"><span class="lock">●</span> https://status.edcs.app</span>
+            </div>
+            <div class="browser-body" style="background: linear-gradient(135deg, #111827, #1e293b); position: relative; overflow: hidden;">
+              <div style="position: absolute; inset: 0; background-image: linear-gradient(rgba(96, 165, 250, 0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(96, 165, 250, 0.04) 1px, transparent 1px); background-size: 32px 32px; opacity: 0.6;"></div>
+              <div style="position: relative; text-align: center; padding: 1.5rem 0;">
+                <div class="eyebrow" style="color: var(--cyan);">Preview surface</div>
+                <div style="font-family: 'IBM Plex Sans', sans-serif; font-size: 1.4rem; font-weight: 700; margin-top: 0.4rem;">
+                  <span style="background: linear-gradient(120deg, var(--cyan) 10%, var(--blue) 50%, var(--purple) 95%); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;">finally beautiful.</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Terminal block -->
+          <h3 class="subsection-title">9.7 — Terminal block</h3>
+          <div class="terminal">
+            <div class="term-bar">
+              <span class="term-dot r"></span><span class="term-dot y"></span><span class="term-dot g"></span>
+              <span class="label">~/vigil — bash</span>
+            </div>
+<pre><span class="term-comment"># Drop the binary on PATH and start the collector</span>
+<span class="term-prompt">$</span> <span class="term-cmd">chmod</span> +x vigil-collector
+<span class="term-prompt">$</span> <span class="term-cmd">mv</span> vigil-collector ~/.local/bin/   <span class="term-comment"># or: sudo mv ... /usr/local/bin/</span>
+<span class="term-prompt">$</span> <span class="term-cmd">vigil-collector</span> <span class="term-flag">--address</span>=0.0.0.0 <span class="term-flag">--port</span>=4500
+  ➜  Listening on <span class="term-string">http://0.0.0.0:4500</span></pre>
+          </div>
+          <div class="callout" style="margin-top: 1rem;">
+            <b>Term coloring (locked).</b>
+            <code class="term-chip" style="color: #22d3ee;">$</code> prompt cyan,
+            <code class="term-chip" style="color: #f1f5f9;">command</code> primary,
+            <code class="term-chip" style="color: #fbbf24;">--flag</code> amber,
+            <code class="term-chip" style="color: #34d399;">"string"</code> emerald,
+            <code class="term-chip" style="color: #94a3b8; font-style: italic;"># comment</code> dim italic.
+          </div>
+
+          <!-- Architecture -->
+          <h3 class="subsection-title">9.8 — Architecture nodes</h3>
+          <div class="arch">
+            <div class="arch-node blue">
+              <span class="arch-tag">Backend</span>
+              <h4>Vigil Collector</h4>
+              <ul>
+                <li>1 Hz sampler · single Rust binary</li>
+                <li>tokio + sysinfo</li>
+                <li>HTTP /system, /network</li>
+                <li>WebSocket /connect</li>
+              </ul>
+            </div>
+            <div class="arch-arrow" aria-hidden="true">
+              <svg width="46" height="22" viewBox="0 0 46 22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M2 11h36M30 4l8 7-8 7"/>
+              </svg>
+              <span class="arch-pulse">JSON · 1 Hz</span>
+            </div>
+            <div class="arch-node cyan">
+              <span class="arch-tag">Frontend</span>
+              <h4>Vigil</h4>
+              <ul>
+                <li>Vue 3 · Pinia · TypeScript</li>
+                <li>D3 realtime charts</li>
+                <li>Sass tokens</li>
+                <li>Dark + light theme</li>
+              </ul>
+            </div>
+          </div>
+
+          <!-- Callouts -->
+          <h3 class="subsection-title">9.9 — Callouts</h3>
+          <div class="callout">
+            <b>Tip.</b> Use the cyan callout to flag rules and best practices — anything that helps a reader make the right decision.
+          </div>
+          <div class="callout warn">
+            <b>Watch out.</b> Use amber when something is conditional or fragile, but not destructive.
+          </div>
+          <div class="callout dont">
+            <b>Don't.</b> Use rose for anti-patterns, destructive actions, and outright mistakes.
+          </div>
+        </section>
+
+        <!-- 10 CHARTS ────────────────── -->
+        <section class="section" id="charts">
+          <div class="section-eyebrow">10 · Data viz</div>
+          <h2 class="section-title">Glow lines, never flat lines.</h2>
+          <p class="section-lede">
+            Charts are first-class brand surfaces. One tone per chart. Stroke gradients along the X axis. Subtle axes. Tabular numerics on every label.
+          </p>
+
+          <div class="grid-2" style="margin-top: 1.5rem;">
+            <div class="panel"><div class="panel-body">
+              <div class="chart-wrap">
+                <div class="chart-head">
+                  <span class="chart-label">CPU · last 30s</span>
+                  <span class="chart-value metric-num"><span class="cv" data-chart="0">42.8</span> <span style="color: var(--text-mute); font-size: 0.85rem;">%</span></span>
+                </div>
+                <svg class="chart-svg" data-chart-svg="0" data-tone="cyan" preserveAspectRatio="none" viewBox="0 0 600 100"></svg>
+              </div>
+            </div></div>
+
+            <div class="panel"><div class="panel-body">
+              <div class="chart-wrap">
+                <div class="chart-head">
+                  <span class="chart-label">Memory · last 30s</span>
+                  <span class="chart-value metric-num"><span class="cv" data-chart="1">61.4</span> <span style="color: var(--text-mute); font-size: 0.85rem;">%</span></span>
+                </div>
+                <svg class="chart-svg" data-chart-svg="1" data-tone="purple" preserveAspectRatio="none" viewBox="0 0 600 100"></svg>
+              </div>
+            </div></div>
+
+            <div class="panel"><div class="panel-body">
+              <div class="chart-wrap">
+                <div class="chart-head">
+                  <span class="chart-label">Network in · last 30s</span>
+                  <span class="chart-value metric-num"><span class="cv" data-chart="2">22.4</span> <span style="color: var(--text-mute); font-size: 0.85rem;">MB/s</span></span>
+                </div>
+                <svg class="chart-svg" data-chart-svg="2" data-tone="emerald" preserveAspectRatio="none" viewBox="0 0 600 100"></svg>
+              </div>
+            </div></div>
+
+            <div class="panel"><div class="panel-body">
+              <div class="chart-wrap">
+                <div class="chart-head">
+                  <span class="chart-label">Disk I/O · last 30s</span>
+                  <span class="chart-value metric-num"><span class="cv" data-chart="3">9.1</span> <span style="color: var(--text-mute); font-size: 0.85rem;">MB/s</span></span>
+                </div>
+                <svg class="chart-svg" data-chart-svg="3" data-tone="amber" preserveAspectRatio="none" viewBox="0 0 600 100"></svg>
+              </div>
+            </div></div>
+          </div>
+
+          <h3 class="subsection-title">Tone palette (canonical ChartTone)</h3>
+          <div class="recipe">
+            <button class="recipe-copy" data-copy='{
+  blue:    { primary: "#60a5fa", secondary: "#93c5fd", glow: "rgba(96, 165, 250, 0.55)" },
+  cyan:    { primary: "#22d3ee", secondary: "#67e8f9", glow: "rgba(34, 211, 238, 0.55)" },
+  emerald: { primary: "#10b981", secondary: "#34d399", glow: "rgba(16, 185, 129, 0.55)" },
+  purple:  { primary: "#a78bfa", secondary: "#c4b5fd", glow: "rgba(167, 139, 250, 0.55)" },
+  amber:   { primary: "#f59e0b", secondary: "#fbbf24", glow: "rgba(245, 158, 11, 0.55)" },
+  rose:    { primary: "#f43f5e", secondary: "#fb7185", glow: "rgba(244, 63, 94, 0.55)" },
+}'>Copy</button>
+            <div class="terminal">
+              <div class="term-bar">
+                <span class="term-dot r"></span><span class="term-dot y"></span><span class="term-dot g"></span>
+                <span class="label">tones.ts</span>
+              </div>
+<pre><span class="term-key">const</span> <span class="term-prop">TONES</span> = {
+  <span class="term-prop">blue</span>:    { primary: <span class="term-string">"#60a5fa"</span>, secondary: <span class="term-string">"#93c5fd"</span>, glow: <span class="term-string">"rgba(96, 165, 250, 0.55)"</span> },
+  <span class="term-prop">cyan</span>:    { primary: <span class="term-string">"#22d3ee"</span>, secondary: <span class="term-string">"#67e8f9"</span>, glow: <span class="term-string">"rgba(34, 211, 238, 0.55)"</span> },
+  <span class="term-prop">emerald</span>: { primary: <span class="term-string">"#10b981"</span>, secondary: <span class="term-string">"#34d399"</span>, glow: <span class="term-string">"rgba(16, 185, 129, 0.55)"</span> },
+  <span class="term-prop">purple</span>:  { primary: <span class="term-string">"#a78bfa"</span>, secondary: <span class="term-string">"#c4b5fd"</span>, glow: <span class="term-string">"rgba(167, 139, 250, 0.55)"</span> },
+  <span class="term-prop">amber</span>:   { primary: <span class="term-string">"#f59e0b"</span>, secondary: <span class="term-string">"#fbbf24"</span>, glow: <span class="term-string">"rgba(245, 158, 11, 0.55)"</span> },
+  <span class="term-prop">rose</span>:    { primary: <span class="term-string">"#f43f5e"</span>, secondary: <span class="term-string">"#fb7185"</span>, glow: <span class="term-string">"rgba(244, 63, 94, 0.55)"</span> },
+};</pre>
+            </div>
+          </div>
+        </section>
+
+        <!-- 11 MOTION ────────────────── -->
+        <section class="section" id="motion">
+          <div class="section-eyebrow">11 · Motion</div>
+          <h2 class="section-title">Slow, soft, and informative.</h2>
+          <p class="section-lede">
+            Three patterns recur. Every animation is gated behind <code class="inline">prefers-reduced-motion: reduce</code>.
+          </p>
+
+          <div class="grid-3" style="margin-top: 1.5rem;">
+            <div class="panel"><div class="panel-body" style="text-align: center; padding: 1.5rem;">
+              <span class="chip live" style="font-size: 0.85rem; padding: 0.45rem 1rem;"><span class="chip-dot" style="width: 9px; height: 9px;"></span>LIVE</span>
+              <h4 style="margin-top: 1rem; font-size: 1rem;">Live pulse</h4>
+              <p style="color: var(--text-mute); font-size: 0.85rem; margin-top: 0.4rem;">
+                1.4–1.6s opacity oscillation, optional 0.9–1.1 scale.
+              </p>
+            </div></div>
+            <div class="panel hover-demo"><div class="panel-body" style="text-align: center; padding: 1.5rem;">
+              <div style="font-family: 'IBM Plex Mono', monospace; font-size: 0.8rem; color: var(--cyan); letter-spacing: 0.18em;">↑ HOVER ME</div>
+              <h4 style="margin-top: 1rem; font-size: 1rem;">Lift on hover</h4>
+              <p style="color: var(--text-mute); font-size: 0.85rem; margin-top: 0.4rem;">
+                -1 to -3 px translateY, 180-250 ms ease, deepen shadow.
+              </p>
+            </div></div>
+            <div class="panel"><div class="panel-body" style="text-align: center; padding: 1.5rem;">
+              <button class="btn replay-reveal" style="font-size: 0.78rem;">Replay reveal</button>
+              <h4 style="margin-top: 1rem; font-size: 1rem;" class="reveal-target">Reveal on scroll</h4>
+              <p style="color: var(--text-mute); font-size: 0.85rem; margin-top: 0.4rem;">
+                opacity 0→1, translateY 18px→0, 700 ms cubic-bezier.
+              </p>
+            </div></div>
+          </div>
+
+          <h3 class="subsection-title">Reduced motion gate</h3>
+          <div class="recipe">
+            <button class="recipe-copy" data-copy="@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}">Copy</button>
+            <div class="terminal">
+              <div class="term-bar">
+                <span class="term-dot r"></span><span class="term-dot y"></span><span class="term-dot g"></span>
+                <span class="label">motion-gate.css</span>
+              </div>
+<pre><span class="term-tag">@media</span> (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    <span class="term-key">animation-duration</span>: <span class="term-num">0.01ms</span> !important;
+    <span class="term-key">animation-iteration-count</span>: <span class="term-num">1</span> !important;
+    <span class="term-key">transition-duration</span>: <span class="term-num">0.01ms</span> !important;
+  }
+  <span class="term-comment">/* Plus disable atmosphere drift, browser tilt, sheen, spotlight */</span>
+}</pre>
+            </div>
+          </div>
+        </section>
+
+        <!-- 12 MINIMUM IDENTITY ──────── -->
+        <section class="section" id="minimum">
+          <div class="section-eyebrow">12 · Minimum identity</div>
+          <h2 class="section-title">Six things you can't drop.</h2>
+          <p class="section-lede">
+            Skip any of these and the brand starts to feel like something else. Get all six and a reader will recognize it as Vigil before they read a single word.
+          </p>
+
+          <div class="grid-2" style="margin-top: 1.5rem;">
+            <div class="panel"><div class="panel-body">
+              <span class="eyebrow eyebrow-accent">01</span>
+              <h3 style="margin-top: 0.4rem; font-size: 1.05rem;">The mark</h3>
+              <p style="color: var(--text-mute); font-size: 0.9rem; margin-top: 0.4rem;">A cube-stack or derivative in the same palette, drop-shadowed in cyan.</p>
+            </div></div>
+            <div class="panel"><div class="panel-body">
+              <span class="eyebrow eyebrow-accent">02</span>
+              <h3 style="margin-top: 0.4rem; font-size: 1.05rem;">The atmosphere</h3>
+              <p style="color: var(--text-mute); font-size: 0.9rem; margin-top: 0.4rem;">Fixed multi-radial glow + masked grid behind everything.</p>
+            </div></div>
+            <div class="panel"><div class="panel-body">
+              <span class="eyebrow eyebrow-accent">03</span>
+              <h3 style="margin-top: 0.4rem; font-size: 1.05rem;">Hero chrome recipe</h3>
+              <p style="color: var(--text-mute); font-size: 0.9rem; margin-top: 0.4rem;">Header gradient + grid overlay + corner glows on every dark hero element.</p>
+            </div></div>
+            <div class="panel"><div class="panel-body">
+              <span class="eyebrow eyebrow-accent">04</span>
+              <h3 style="margin-top: 0.4rem; font-size: 1.05rem;">Type triumvirate</h3>
+              <p style="color: var(--text-mute); font-size: 0.9rem; margin-top: 0.4rem;">IBM Plex Sans / Lato / IBM Plex Mono, used by role.</p>
+            </div></div>
+            <div class="panel"><div class="panel-body">
+              <span class="eyebrow eyebrow-accent">05</span>
+              <h3 style="margin-top: 0.4rem; font-size: 1.05rem;">Accents as LEDs</h3>
+              <p style="color: var(--text-mute); font-size: 0.9rem; margin-top: 0.4rem;">Saturated colors only on text, icons, strokes — never as backgrounds.</p>
+            </div></div>
+            <div class="panel"><div class="panel-body">
+              <span class="eyebrow eyebrow-accent">06</span>
+              <h3 style="margin-top: 0.4rem; font-size: 1.05rem;">Tabular figures</h3>
+              <p style="color: var(--text-mute); font-size: 0.9rem; margin-top: 0.4rem;">Anywhere a number can change in place. No exceptions.</p>
+            </div></div>
+          </div>
+        </section>
+
+        <!-- FOOTER ─────────────── -->
+        <footer>
+          <div class="foot-inner">
+            <a href="#" class="brand">
+              <img class="brand-mark" src="logo.svg" alt="" aria-hidden="true" style="width: 28px; height: 28px;" />
+              <span class="brand-name" style="font-size: 0.9rem;">Vigil — Design</span>
+            </a>
+            <div class="foot-meta">
+              <span>MIT</span>
+              <a href="index.html">Marketing</a>
+              <a href="https://github.com/sentrychris/vigil" target="_blank" rel="noopener">GitHub</a>
+              <a href="../BRANDING.md" target="_blank">Spec (md)</a>
+            </div>
+          </div>
+        </footer>
+      </main>
+    </div>
+
+    <!-- Copy toast -->
+    <div class="copy-toast" id="toast"><span class="check">✓</span> <span id="toast-text">Copied</span></div>
+
+    <script>
+      // ═══════════════════════════════════════════════════════════════════
+      // Copy-to-clipboard — swatches & recipes
+      // ═══════════════════════════════════════════════════════════════════
+      const toast = document.getElementById("toast");
+      const toastText = document.getElementById("toast-text");
+      let toastTimer = null;
+      const showToast = (label) => {
+        toastText.textContent = label;
+        toast.classList.add("show");
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => toast.classList.remove("show"), 1500);
+      };
+      const doCopy = async (text) => {
+        try {
+          await navigator.clipboard.writeText(text);
+          return true;
+        } catch (_) {
+          // fallback
+          const ta = document.createElement("textarea");
+          ta.value = text;
+          ta.style.position = "fixed";
+          ta.style.opacity = "0";
+          document.body.appendChild(ta);
+          ta.select();
+          let ok = false;
+          try { ok = document.execCommand("copy"); } catch (_) {}
+          document.body.removeChild(ta);
+          return ok;
+        }
+      };
+
+      // Swatches
+      document.querySelectorAll(".swatch").forEach((sw) => {
+        sw.addEventListener("click", async () => {
+          const value = sw.getAttribute("data-copy");
+          if (!value) return;
+          if (await doCopy(value)) showToast("Copied " + value);
+        });
+      });
+
+      // Recipe copy buttons
+      document.querySelectorAll(".recipe-copy").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const value = btn.getAttribute("data-copy");
+          if (!value) return;
+          if (await doCopy(value)) {
+            const original = btn.textContent;
+            btn.textContent = "Copied ✓";
+            btn.classList.add("copied");
+            showToast("Recipe copied");
+            setTimeout(() => {
+              btn.textContent = original;
+              btn.classList.remove("copied");
+            }, 1500);
+          }
+        });
+      });
+
+      // ═══════════════════════════════════════════════════════════════════
+      // Stat-card interactions: click to randomize values; tone picker re-tints icons
+      // ═══════════════════════════════════════════════════════════════════
+      const stats = {
+        cpu: { format: (v) => v.toFixed(1), max: 100, range: [12, 92] },
+        mem: { format: (v) => v.toFixed(1), max: 32, range: [4, 28], unit: "GB" },
+        net: { format: (v) => v.toFixed(1), max: 100, range: [2, 60] },
+      };
+      document.querySelectorAll(".stat-card").forEach((card) => {
+        card.addEventListener("click", () => {
+          const key = card.getAttribute("data-stat");
+          const cfg = stats[key];
+          const [lo, hi] = cfg.range;
+          const next = lo + Math.random() * (hi - lo);
+          const valueEl = card.querySelector(".value");
+          const barEl = card.querySelector(".bar > span");
+          if (valueEl) valueEl.textContent = cfg.format(next);
+          if (barEl) barEl.style.width = Math.min(100, (next / cfg.max) * 100) + "%";
+        });
+      });
+
+      // Tone picker
+      document.querySelectorAll(".tone-pick").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const tone = btn.getAttribute("data-tone");
+          document.querySelectorAll(".stat-tile").forEach((t) => {
+            t.classList.remove("tone-blue", "tone-cyan", "tone-emerald", "tone-purple", "tone-amber", "tone-rose");
+            t.classList.add("tone-" + tone);
+          });
+          // Also retint the bar gradients for fun
+          const colors = {
+            blue:    ["#60a5fa", "#93c5fd"],
+            cyan:    ["#22d3ee", "#67e8f9"],
+            emerald: ["#10b981", "#34d399"],
+            purple:  ["#a78bfa", "#c4b5fd"],
+            amber:   ["#f59e0b", "#fbbf24"],
+            rose:    ["#f43f5e", "#fb7185"],
+          };
+          const [a, b] = colors[tone];
+          document.querySelectorAll(".stat-card .bar > span").forEach((bar) => {
+            bar.style.background = `linear-gradient(90deg, ${a}, ${b})`;
+          });
+        });
+      });
+
+      // ═══════════════════════════════════════════════════════════════════
+      // TOC active-section highlighting (scroll-spy)
+      // ═══════════════════════════════════════════════════════════════════
+      const tocLinks = document.querySelectorAll(".toc a");
+      const sections = Array.from(document.querySelectorAll(".section[id]"));
+      const tocByHash = {};
+      tocLinks.forEach((a) => { tocByHash[a.getAttribute("href")] = a; });
+
+      const setActiveTOC = () => {
+        const fromTop = window.scrollY + 130;
+        let active = sections[0];
+        for (const s of sections) {
+          if (s.offsetTop <= fromTop) active = s;
+        }
+        tocLinks.forEach((a) => a.classList.remove("active"));
+        const link = tocByHash["#" + active.id];
+        if (link) link.classList.add("active");
+      };
+      setActiveTOC();
+      window.addEventListener("scroll", setActiveTOC, { passive: true });
+
+      // ═══════════════════════════════════════════════════════════════════
+      // Realtime sparkline charts
+      // ═══════════════════════════════════════════════════════════════════
+      const TONES = {
+        blue:    { primary: "#60a5fa", secondary: "#93c5fd", glow: "rgba(96, 165, 250, 0.55)" },
+        cyan:    { primary: "#22d3ee", secondary: "#67e8f9", glow: "rgba(34, 211, 238, 0.55)" },
+        emerald: { primary: "#10b981", secondary: "#34d399", glow: "rgba(16, 185, 129, 0.55)" },
+        purple:  { primary: "#a78bfa", secondary: "#c4b5fd", glow: "rgba(167, 139, 250, 0.55)" },
+        amber:   { primary: "#f59e0b", secondary: "#fbbf24", glow: "rgba(245, 158, 11, 0.55)" },
+        rose:    { primary: "#f43f5e", secondary: "#fb7185", glow: "rgba(244, 63, 94, 0.55)" },
+      };
+      const SVG_NS = "http://www.w3.org/2000/svg";
+      const charts = [];
+      const buildChart = (svg, idx) => {
+        const tone = TONES[svg.getAttribute("data-tone")] || TONES.cyan;
+        const W = 600, H = 100;
+        // defs
+        const defs = document.createElementNS(SVG_NS, "defs");
+        const gradId = `g-${idx}`;
+        const fillId = `f-${idx}`;
+        const blurId = `b-${idx}`;
+
+        const linear = document.createElementNS(SVG_NS, "linearGradient");
+        linear.setAttribute("id", gradId);
+        linear.setAttribute("x1", "0"); linear.setAttribute("y1", "0");
+        linear.setAttribute("x2", "1"); linear.setAttribute("y2", "0");
+        const s1 = document.createElementNS(SVG_NS, "stop");
+        s1.setAttribute("offset", "0%"); s1.setAttribute("stop-color", tone.secondary);
+        const s2 = document.createElementNS(SVG_NS, "stop");
+        s2.setAttribute("offset", "100%"); s2.setAttribute("stop-color", tone.primary);
+        linear.appendChild(s1); linear.appendChild(s2);
+
+        const fill = document.createElementNS(SVG_NS, "linearGradient");
+        fill.setAttribute("id", fillId);
+        fill.setAttribute("x1", "0"); fill.setAttribute("y1", "0");
+        fill.setAttribute("x2", "0"); fill.setAttribute("y2", "1");
+        const f1 = document.createElementNS(SVG_NS, "stop");
+        f1.setAttribute("offset", "0%"); f1.setAttribute("stop-color", tone.primary);
+        f1.setAttribute("stop-opacity", "0.35");
+        const f2 = document.createElementNS(SVG_NS, "stop");
+        f2.setAttribute("offset", "100%"); f2.setAttribute("stop-color", tone.primary);
+        f2.setAttribute("stop-opacity", "0");
+        fill.appendChild(f1); fill.appendChild(f2);
+
+        const filter = document.createElementNS(SVG_NS, "filter");
+        filter.setAttribute("id", blurId);
+        filter.setAttribute("x", "-10%"); filter.setAttribute("y", "-10%");
+        filter.setAttribute("width", "120%"); filter.setAttribute("height", "120%");
+        const blur = document.createElementNS(SVG_NS, "feGaussianBlur");
+        blur.setAttribute("stdDeviation", "3");
+        filter.appendChild(blur);
+
+        defs.appendChild(linear);
+        defs.appendChild(fill);
+        defs.appendChild(filter);
+        svg.appendChild(defs);
+
+        // axis baseline
+        const axis = document.createElementNS(SVG_NS, "line");
+        axis.setAttribute("x1", "0"); axis.setAttribute("y1", H - 1);
+        axis.setAttribute("x2", W); axis.setAttribute("y2", H - 1);
+        axis.setAttribute("stroke", "rgba(148, 163, 184, 0.3)");
+        axis.setAttribute("stroke-width", "0.5");
+        svg.appendChild(axis);
+
+        // glow stroke (under)
+        const glowPath = document.createElementNS(SVG_NS, "path");
+        glowPath.setAttribute("fill", "none");
+        glowPath.setAttribute("stroke", tone.glow);
+        glowPath.setAttribute("stroke-width", "5");
+        glowPath.setAttribute("stroke-linecap", "round");
+        glowPath.setAttribute("stroke-linejoin", "round");
+        glowPath.setAttribute("filter", `url(#${blurId})`);
+        svg.appendChild(glowPath);
+
+        // area fill
+        const area = document.createElementNS(SVG_NS, "path");
+        area.setAttribute("fill", `url(#${fillId})`);
+        svg.appendChild(area);
+
+        // top stroke
+        const path = document.createElementNS(SVG_NS, "path");
+        path.setAttribute("fill", "none");
+        path.setAttribute("stroke", `url(#${gradId})`);
+        path.setAttribute("stroke-width", "1.8");
+        path.setAttribute("stroke-linecap", "round");
+        path.setAttribute("stroke-linejoin", "round");
+        svg.appendChild(path);
+
+        return { svg, W, H, path, glowPath, area, data: [], tone, idx };
+      };
+
+      document.querySelectorAll("[data-chart-svg]").forEach((svg) => {
+        const idx = parseInt(svg.getAttribute("data-chart-svg"));
+        charts[idx] = buildChart(svg, idx);
+        // seed with values
+        for (let i = 0; i < 60; i++) charts[idx].data.push(20 + Math.random() * 60);
+      });
+
+      const drawChart = (c) => {
+        if (!c.data.length) return;
+        const { W, H, data } = c;
+        const stepX = W / (data.length - 1);
+        const minV = 0;
+        const maxV = 100;
+        const toY = (v) => H - 6 - ((v - minV) / (maxV - minV)) * (H - 12);
+        let d = `M 0 ${toY(data[0])}`;
+        for (let i = 1; i < data.length; i++) {
+          const x = i * stepX;
+          const y = toY(data[i]);
+          // simple smooth curve
+          const px = (i - 1) * stepX;
+          const py = toY(data[i - 1]);
+          const cx = (px + x) / 2;
+          d += ` Q ${cx} ${py}, ${cx} ${(py + y) / 2} T ${x} ${y}`;
+        }
+        c.path.setAttribute("d", d);
+        c.glowPath.setAttribute("d", d);
+        c.area.setAttribute("d", d + ` L ${W} ${H} L 0 ${H} Z`);
+      };
+
+      const seeds = [42.8, 61.4, 22.4, 9.1];
+      const decimals = [1, 1, 1, 1];
+      const ranges = [[12, 92], [40, 80], [5, 60], [2, 35]];
+
+      const tick = () => {
+        charts.forEach((c, idx) => {
+          if (!c) return;
+          const [lo, hi] = ranges[idx];
+          const last = c.data[c.data.length - 1];
+          // walk the value
+          let next = last + (Math.random() - 0.5) * 14;
+          if (next < lo) next = lo + Math.random() * 4;
+          if (next > hi) next = hi - Math.random() * 4;
+          c.data.push(next);
+          if (c.data.length > 60) c.data.shift();
+          drawChart(c);
+          const valEl = document.querySelector(`.cv[data-chart="${idx}"]`);
+          if (valEl) valEl.textContent = next.toFixed(decimals[idx]);
+        });
+      };
+      // initial draw
+      charts.forEach(drawChart);
+      // run unless reduced motion
+      const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      if (!reduceMotion) setInterval(tick, 700);
+
+      // ═══════════════════════════════════════════════════════════════════
+      // Scroll-reveal demo (replay button)
+      // ═══════════════════════════════════════════════════════════════════
+      document.querySelectorAll(".replay-reveal").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const target = btn.parentElement.querySelector(".reveal-target");
+          if (!target) return;
+          target.style.transition = "none";
+          target.style.opacity = "0";
+          target.style.transform = "translateY(18px)";
+          // force reflow
+          void target.offsetHeight;
+          target.style.transition = "opacity 700ms ease, transform 700ms cubic-bezier(.2,.8,.2,1)";
+          target.style.opacity = "1";
+          target.style.transform = "translateY(0)";
+        });
+      });
+    </script>
+  </body>
+</html>
