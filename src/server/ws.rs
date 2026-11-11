@@ -25,12 +25,19 @@ struct Slot(Arc<AtomicUsize>);
 
 impl Slot {
     fn try_reserve(active: &Arc<AtomicUsize>, max: usize) -> Option<Self> {
-        active
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
-                (n < max).then_some(n + 1)
-            })
-            .ok()
-            .map(|_| Slot(active.clone()))
+        // Explicit CAS loop rather than ``fetch_update``, which Rust 1.99
+        // deprecates in favour of ``try_update`` (not available on our
+        // 1.95 MSRV).
+        let mut n = active.load(Ordering::Acquire);
+        loop {
+            if n >= max {
+                return None;
+            }
+            match active.compare_exchange_weak(n, n + 1, Ordering::AcqRel, Ordering::Acquire) {
+                Ok(_) => return Some(Slot(active.clone())),
+                Err(current) => n = current,
+            }
+        }
     }
 }
 

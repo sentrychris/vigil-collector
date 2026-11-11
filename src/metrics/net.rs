@@ -1,5 +1,5 @@
-use std::collections::BTreeMap;
-use std::ffi::OsStr;
+use std::collections::{BTreeMap, HashSet};
+use std::ffi::{OsStr, OsString};
 use std::time::Instant;
 
 use sysinfo::Networks;
@@ -25,14 +25,78 @@ fn is_loopback(name: &OsStr, data: &sysinfo::NetworkData) -> bool {
     !ips.is_empty() && ips.iter().all(|n| n.addr.is_loopback())
 }
 
+/// Interfaces to leave out of every network figure.
+///
+/// On Windows that's NDIS *filter* interfaces ("WiFi-VirtualBox NDIS
+/// Light-Weight Filter-0000", "Ethernet-WFP Native MAC Layer LightWeight
+/// Filter-0000", ...). Each is a view of an adapter it sits on top of and
+/// reports that adapter's counters, so summing them double-counts its
+/// traffic. They have their own GUID and MAC, so sysinfo's de-duplication
+/// doesn't catch them; ``GetIfTable2``'s ``FilterInterface`` flag does.
+/// Empty elsewhere.
+#[derive(Default)]
+pub struct Hidden(HashSet<OsString>);
+
+impl Hidden {
+    fn contains(&self, name: &OsStr) -> bool {
+        self.0.contains(name)
+    }
+}
+
+#[cfg(windows)]
+pub fn hidden_interfaces() -> Hidden {
+    use std::os::windows::ffi::OsStringExt;
+    use windows_sys::Win32::NetworkManagement::IpHelper::{
+        FreeMibTable, GetIfTable2, MIB_IF_ROW2, MIB_IF_TABLE2,
+    };
+
+    // Bit 1 of InterfaceAndOperStatusFlags (HardwareInterface is bit 0).
+    const FILTER_INTERFACE: u8 = 1 << 1;
+
+    let mut set = HashSet::new();
+    let mut table: *mut MIB_IF_TABLE2 = std::ptr::null_mut();
+    // SAFETY: GetIfTable2 allocates the table and stores its address in
+    // ``table``; on success it holds ``NumEntries`` rows laid out
+    // contiguously from ``Table``, and is released with FreeMibTable.
+    unsafe {
+        if GetIfTable2(&mut table) != 0 || table.is_null() {
+            return Hidden(set);
+        }
+        let n = (*table).NumEntries as usize;
+        let rows: &[MIB_IF_ROW2] =
+            std::slice::from_raw_parts(std::ptr::addr_of!((*table).Table).cast(), n);
+        for row in rows {
+            if row.InterfaceAndOperStatusFlags._bitfield & FILTER_INTERFACE != 0 {
+                let len = row
+                    .Alias
+                    .iter()
+                    .position(|&c| c == 0)
+                    .unwrap_or(row.Alias.len());
+                set.insert(OsString::from_wide(&row.Alias[..len]));
+            }
+        }
+        FreeMibTable(table.cast());
+    }
+    Hidden(set)
+}
+
+#[cfg(not(windows))]
+pub fn hidden_interfaces() -> Hidden {
+    Hidden::default()
+}
+
 /// Aggregate rx/tx bytes/sec, derived from the delta of total bytes
-/// received/sent across all interfaces (loopback excluded). The first
-/// call (no previous reading) returns zeros.
-pub fn collect_throughput(networks: &Networks, prev: &mut Option<NetIoPrev>) -> Throughput {
+/// received/sent across all interfaces (loopback and filter interfaces
+/// excluded). The first call (no previous reading) returns zeros.
+pub fn collect_throughput(
+    networks: &Networks,
+    hidden: &Hidden,
+    prev: &mut Option<NetIoPrev>,
+) -> Throughput {
     let mut recv = 0u64;
     let mut sent = 0u64;
     for (name, data) in networks.iter() {
-        if is_loopback(name, data) {
+        if is_loopback(name, data) || hidden.contains(name) {
             continue;
         }
         recv = recv.saturating_add(data.total_received());
@@ -59,18 +123,22 @@ pub fn collect_throughput(networks: &Networks, prev: &mut Option<NetIoPrev>) -> 
 
 /// Interface names, sorted so ``/network`` lists them in a stable order
 /// (sysinfo stores them in a HashMap) that matches ``statistics``.
-pub fn interface_names(networks: &Networks) -> Vec<String> {
+pub fn interface_names(networks: &Networks, hidden: &Hidden) -> Vec<String> {
     let mut names: Vec<String> = networks
         .keys()
+        .filter(|name| !hidden.contains(name))
         .map(|name| name.to_string_lossy().into_owned())
         .collect();
     names.sort_unstable();
     names
 }
 
-pub fn statistics(networks: &Networks) -> BTreeMap<String, NetIfaceStats> {
+pub fn statistics(networks: &Networks, hidden: &Hidden) -> BTreeMap<String, NetIfaceStats> {
     let mut out = BTreeMap::new();
     for (name, d) in networks.iter() {
+        if hidden.contains(name) {
+            continue;
+        }
         let stats = NetIfaceStats {
             mb_sent: d.total_transmitted() as f64 / (1024.0 * 1024.0),
             mb_received: d.total_received() as f64 / (1024.0 * 1024.0),

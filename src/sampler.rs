@@ -131,11 +131,12 @@ impl SamplerState {
         let disk_root = metrics::disk::collect_root(&self.disks);
         let all_disks = metrics::disk::collect_all(&self.disks);
         let disk_io = metrics::disk::collect_io(&mut self.disk_io_prev);
-        let net = metrics::net::collect_throughput(&self.networks, &mut self.net_io_prev);
+        let hidden = metrics::net::hidden_interfaces();
+        let net = metrics::net::collect_throughput(&self.networks, &hidden, &mut self.net_io_prev);
         let plat = metrics::platform::collect();
         let user = metrics::platform::user();
-        let interfaces = metrics::net::interface_names(&self.networks);
-        let network_stats = metrics::net::statistics(&self.networks);
+        let interfaces = metrics::net::interface_names(&self.networks, &hidden);
+        let network_stats = metrics::net::statistics(&self.networks, &hidden);
 
         Snapshot {
             cpu,
