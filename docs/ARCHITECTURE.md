@@ -153,6 +153,11 @@ A double-clicked launcher also sets `VIGIL_FIND_FREE_PORT=1`, which lets
 `server::bind` move past a taken port (without `--port`) instead of
 failing; `main` binds before starting the tray so the tooltip and
 double-click URL show the port actually used.
+Every Windows copy except the launcher claims the named mutex
+`Global\VigilCollector` before opening the log, so only one runs per
+computer; the launcher only probes it, and when it's taken asks the
+running copy's tray window (found by class, URL in its title) to open the
+dashboard. Restart releases the mutex before starting the new copy.
 
 Single runtime thread for everything async. Heavy syscalls go to the blocking
 pool so the runtime thread stays unblocked.

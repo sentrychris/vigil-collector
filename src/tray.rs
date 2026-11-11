@@ -16,6 +16,10 @@
 //!    shows how many dashboards are connected and the version, and
 //!    double-clicking the icon opens the dashboard in the browser.
 //!
+//! Only one copy runs per computer (see ``Instance``). Started again while
+//! one is running, it opens that copy's dashboard (double-clicked) or says
+//! where it is (from a terminal) and exits.
+//!
 //! ``--foreground`` skips all of this and runs in the console as before,
 //! with Ctrl-C to stop. So do services and ``SYSTEM`` scheduled tasks
 //! (session 0, which has no desktop to put an icon on) and runs whose
@@ -35,7 +39,10 @@ use std::thread::JoinHandle;
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::TrayEvent;
-use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
+use windows_sys::Win32::Foundation::{
+    CloseHandle, ERROR_ACCESS_DENIED, ERROR_ALREADY_EXISTS, GetLastError, HANDLE, HWND, LPARAM,
+    LRESULT, POINT, WPARAM,
+};
 use windows_sys::Win32::Graphics::Gdi::{
     BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CreateDIBSection, DIB_RGB_COLORS, DeleteObject, HBITMAP,
 };
@@ -45,7 +52,9 @@ use windows_sys::Win32::System::Console::{
 };
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::RemoteDesktop::ProcessIdToSessionId;
-use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+use windows_sys::Win32::System::Threading::{
+    CreateMutexW, GetCurrentProcessId, OpenMutexW, SYNCHRONIZATION_SYNCHRONIZE,
+};
 use windows_sys::Win32::UI::HiDpi::{
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetDpiForWindow, GetSystemMetricsForDpi,
     SetThreadDpiAwarenessContext,
@@ -56,13 +65,13 @@ use windows_sys::Win32::UI::Shell::{
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreateIconFromResourceEx, CreatePopupMenu, CreateWindowExW, DefWindowProcW,
-    DestroyIcon, DestroyMenu, DestroyWindow, DispatchMessageW, GetCursorPos, GetMessageW,
-    GetSystemMetrics, LR_DEFAULTCOLOR, MB_ICONERROR, MB_OK, MENUITEMINFOW, MF_GRAYED, MF_SEPARATOR,
-    MF_STRING, MIIM_BITMAP, MSG, MessageBoxW, PostMessageW, PostQuitMessage, RegisterClassW,
-    RegisterWindowMessageW, SM_CXSMICON, SW_HIDE, SW_SHOWNORMAL, SetForegroundWindow,
-    SetMenuItemInfoW, ShowWindow, TPM_RIGHTBUTTON, TrackPopupMenu, TranslateMessage, WM_APP,
-    WM_CLOSE, WM_COMMAND, WM_CONTEXTMENU, WM_DESTROY, WM_ENDSESSION, WM_LBUTTONDBLCLK, WM_NULL,
-    WM_RBUTTONUP, WNDCLASSW,
+    DestroyIcon, DestroyMenu, DestroyWindow, DispatchMessageW, FindWindowW, GetCursorPos,
+    GetMessageW, GetSystemMetrics, GetWindowTextW, LR_DEFAULTCOLOR, MB_ICONERROR, MB_OK,
+    MENUITEMINFOW, MF_GRAYED, MF_SEPARATOR, MF_STRING, MIIM_BITMAP, MSG, MessageBoxW, PostMessageW,
+    PostQuitMessage, RegisterClassW, RegisterWindowMessageW, SM_CXSMICON, SW_HIDE, SW_SHOWNORMAL,
+    SetForegroundWindow, SetMenuItemInfoW, ShowWindow, TPM_RIGHTBUTTON, TrackPopupMenu,
+    TranslateMessage, WM_APP, WM_CLOSE, WM_COMMAND, WM_CONTEXTMENU, WM_DESTROY, WM_ENDSESSION,
+    WM_LBUTTONDBLCLK, WM_NULL, WM_RBUTTONUP, WNDCLASSW,
 };
 
 /// Set on the tray process so it knows it is the copy, not the launcher.
@@ -86,6 +95,15 @@ const ID_QUIT: usize = 2;
 const ID_CONNECTIONS: usize = 3;
 const ID_VERSION: usize = 4;
 const WM_TRAY: u32 = WM_APP + 1;
+/// Posted by a second copy to the running one: open the dashboard.
+const WM_OPEN_DASHBOARD: u32 = WM_APP + 2;
+/// Held by the running copy, whatever its mode. ``Global\`` makes it one
+/// per computer rather than one per signed-in user, so a ``SYSTEM`` task
+/// and a tray icon can't both run.
+const INSTANCE_MUTEX: &str = "Global\\VigilCollector";
+/// Start of the tray window's title, which is followed by the dashboard
+/// URL so a second copy can say where the running one is.
+const WINDOW_TITLE: &str = "Vigil Collector ";
 
 /// ``DETACHED_PROCESS``: the copy gets no console at all, so nothing
 /// flashes on screen and closing the terminal doesn't stop it.
@@ -180,6 +198,13 @@ pub fn launch(color: bool) -> ! {
         }
         std::process::exit(1);
     };
+
+    if Instance::exists() {
+        if double_clicked && show_running() {
+            std::process::exit(0);
+        }
+        fail(already_running_message());
+    }
 
     let child = tray_command().and_then(|mut cmd| {
         if color {
@@ -277,6 +302,96 @@ pub fn notify_listening() {
 
 fn mode_is_tray() -> bool {
     std::env::var_os(CHILD_ENV).is_some_and(|v| v == "1")
+}
+
+/// Proof that this is the only copy running: holds ``INSTANCE_MUTEX`` until
+/// dropped (or the process exits).
+pub struct Instance(HANDLE);
+
+impl Instance {
+    /// Claims the instance, or says where the running copy is.
+    pub fn claim() -> Result<Self, String> {
+        let name = wide(INSTANCE_MUTEX);
+        // SAFETY: the name is NUL-terminated; the handle is closed on drop.
+        unsafe {
+            let handle = CreateMutexW(std::ptr::null(), 0, name.as_ptr());
+            // An existing mutex opens fine (with ERROR_ALREADY_EXISTS) if
+            // it's ours to open; one made by another account (a SYSTEM
+            // task) fails with access denied. Either way, it's taken.
+            let taken = GetLastError();
+            if handle.is_null() || taken == ERROR_ALREADY_EXISTS {
+                if !handle.is_null() {
+                    CloseHandle(handle);
+                }
+                return Err(already_running_message());
+            }
+            Ok(Self(handle))
+        }
+    }
+
+    /// Whether another copy holds the instance, without claiming it.
+    fn exists() -> bool {
+        let name = wide(INSTANCE_MUTEX);
+        // SAFETY: as in ``claim``.
+        unsafe {
+            let handle = OpenMutexW(SYNCHRONIZATION_SYNCHRONIZE, 0, name.as_ptr());
+            if handle.is_null() {
+                return GetLastError() == ERROR_ACCESS_DENIED;
+            }
+            CloseHandle(handle);
+            true
+        }
+    }
+}
+
+impl Drop for Instance {
+    fn drop(&mut self) {
+        // SAFETY: the handle came from CreateMutexW and is closed once.
+        unsafe { CloseHandle(self.0) };
+    }
+}
+
+/// The running copy's tray window, if it has one (a ``--foreground`` copy
+/// doesn't).
+fn running_window() -> HWND {
+    let class = wide(CLASS_NAME);
+    // SAFETY: the class name is NUL-terminated.
+    unsafe { FindWindowW(class.as_ptr(), std::ptr::null()) }
+}
+
+/// The running copy's dashboard URL, read from its tray window's title.
+fn running_url() -> Option<String> {
+    let hwnd = running_window();
+    if hwnd.is_null() {
+        return None;
+    }
+    let mut buf = [0u16; 256];
+    // SAFETY: the buffer and its length match.
+    let len = unsafe { GetWindowTextW(hwnd, buf.as_mut_ptr(), buf.len() as i32) };
+    let title = String::from_utf16_lossy(&buf[..len.max(0) as usize]);
+    title
+        .strip_prefix(WINDOW_TITLE)
+        .filter(|url| !url.is_empty())
+        .map(str::to_string)
+}
+
+/// Asks the running copy to open its dashboard. False if it has no tray
+/// window to ask.
+fn show_running() -> bool {
+    let hwnd = running_window();
+    // SAFETY: posting to another process's window is fine; a stale handle
+    // just fails.
+    !hwnd.is_null() && unsafe { PostMessageW(hwnd, WM_OPEN_DASHBOARD, 0, 0) } != 0
+}
+
+fn already_running_message() -> String {
+    match running_url() {
+        Some(url) => format!(
+            "Vigil Collector is already running at {url}. Use its tray icon to \
+             restart or quit it."
+        ),
+        None => "Vigil Collector is already running on this computer.".into(),
+    }
 }
 
 /// Whether a taken port should move this process on to the next free one.
@@ -396,7 +511,7 @@ fn run(
             ..Default::default()
         };
         RegisterClassW(&wc);
-        let title = wide("Vigil Collector");
+        let title = wide(format!("{WINDOW_TITLE}{url}"));
         // A hidden top-level window rather than a message-only one: only
         // top-level windows receive the TaskbarCreated broadcast (sent when
         // Explorer restarts) and WM_ENDSESSION.
@@ -646,6 +761,10 @@ unsafe extern "system" fn window_proc(
                     WM_LBUTTONDBLCLK => open_dashboard(),
                     _ => {}
                 }
+                0
+            }
+            WM_OPEN_DASHBOARD => {
+                open_dashboard();
                 0
             }
             WM_COMMAND => {

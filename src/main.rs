@@ -50,6 +50,16 @@ async fn main() -> anyhow::Result<()> {
         tray::Mode::Tray => true,
         tray::Mode::Foreground => false,
     };
+    // One copy per computer. Checked before the log file is opened, which
+    // would otherwise clear the running copy's log.
+    #[cfg(windows)]
+    let instance = match tray::Instance::claim() {
+        Ok(instance) => instance,
+        Err(message) => {
+            eprintln!("{message}");
+            std::process::exit(1);
+        }
+    };
 
     // Settings are read before logging exists, so anything worth reporting
     // about the settings file comes back as notes and is logged right after
@@ -152,6 +162,8 @@ async fn main() -> anyhow::Result<()> {
         drop(tray);
         if serve_result.is_ok() && restart.load(std::sync::atomic::Ordering::SeqCst) {
             tracing::info!("Restarting");
+            // Let the new copy claim the instance.
+            drop(instance);
             tray::respawn()?;
         }
     }

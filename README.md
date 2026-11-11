@@ -230,6 +230,10 @@ version.
   output is redirected to a file or pipe, and when it runs as a service
   or a `SYSTEM` task, which have no desktop to show an icon on.
 
+Only one copy runs per computer. Started again while it's running, it
+opens the running copy's dashboard instead (double-clicked), or prints
+where it's running and exits (from a terminal, or with `--foreground`).
+
 In the tray, the log is written only to the log file (see
 [Configuration](#configuration)).
 
