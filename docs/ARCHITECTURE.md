@@ -1,6 +1,6 @@
 # Architecture
 
-This document is the canonical map of the Vigil Collector codebase. It
+This document is the canonical map of the Vigil codebase (the `vigil-collector` repository). It
 complements the user-facing summary in [README.md](../README.md#architecture)
 with the contributor-level detail an agent or new maintainer needs to make
 non-trivial changes safely.

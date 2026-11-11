@@ -1,5 +1,5 @@
 [Unit]
-Description=Vigil Collector - System Monitoring Utility
+Description=Vigil - System Monitoring Utility
 After=network-online.target
 Wants=network-online.target
 

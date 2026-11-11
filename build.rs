@@ -210,9 +210,13 @@ fn version_info() -> Vec<u8> {
         FIRST_YEAR.to_string()
     };
 
-    let strings: [(&str, String); 8] = [
+    let strings: [(&str, String); 9] = [
         ("CompanyName", author.clone()),
-        ("FileDescription", "Vigil Collector".into()),
+        ("FileDescription", "Vigil".into()),
+        (
+            "Comments",
+            "A system monitoring utility with remote connection capabilities.".into(),
+        ),
         ("FileVersion", version.clone()),
         ("InternalName", "vigil-collector".into()),
         (

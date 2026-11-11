@@ -1,6 +1,6 @@
 # Runtime semantics
 
-How concurrency, ownership, and lifecycle work in the Collector. If you come
+How concurrency, ownership, and lifecycle work in Vigil. If you come
 to Rust from Python, TypeScript, or C#, this is where the model differs most.
 
 For the structural map, see [ARCHITECTURE.md](./ARCHITECTURE.md). For the

@@ -44,7 +44,8 @@ use windows_sys::Win32::Foundation::{
     LRESULT, POINT, WPARAM,
 };
 use windows_sys::Win32::Graphics::Gdi::{
-    BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CreateDIBSection, DIB_RGB_COLORS, DeleteObject, HBITMAP,
+    BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CreateDIBSection, DIB_RGB_COLORS, DeleteObject, GetDC,
+    GetDIBits, HBITMAP, ReleaseDC,
 };
 use windows_sys::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
 use windows_sys::Win32::System::Console::{
@@ -66,12 +67,12 @@ use windows_sys::Win32::UI::Shell::{
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreateIconFromResourceEx, CreatePopupMenu, CreateWindowExW, DefWindowProcW,
     DestroyIcon, DestroyMenu, DestroyWindow, DispatchMessageW, FindWindowW, GetCursorPos,
-    GetMessageW, GetSystemMetrics, GetWindowTextW, LR_DEFAULTCOLOR, MB_ICONERROR, MB_OK,
-    MENUITEMINFOW, MF_GRAYED, MF_SEPARATOR, MF_STRING, MIIM_BITMAP, MSG, MessageBoxW, PostMessageW,
-    PostQuitMessage, RegisterClassW, RegisterWindowMessageW, SM_CXSMICON, SW_HIDE, SW_SHOWNORMAL,
-    SetForegroundWindow, SetMenuItemInfoW, ShowWindow, TPM_RIGHTBUTTON, TrackPopupMenu,
-    TranslateMessage, WM_APP, WM_CLOSE, WM_COMMAND, WM_CONTEXTMENU, WM_DESTROY, WM_ENDSESSION,
-    WM_LBUTTONDBLCLK, WM_NULL, WM_RBUTTONUP, WNDCLASSW,
+    GetIconInfo, GetMessageW, GetSystemMetrics, GetWindowTextW, HICON, ICONINFO, LR_DEFAULTCOLOR,
+    MB_ICONERROR, MB_OK, MENUITEMINFOW, MF_GRAYED, MF_SEPARATOR, MF_STRING, MIIM_BITMAP, MSG,
+    MessageBoxW, PostMessageW, PostQuitMessage, RegisterClassW, RegisterWindowMessageW,
+    SM_CXSMICON, SW_HIDE, SW_SHOWNORMAL, SetForegroundWindow, SetMenuDefaultItem, SetMenuItemInfoW,
+    ShowWindow, TPM_RIGHTBUTTON, TrackPopupMenu, TranslateMessage, WM_APP, WM_CLOSE, WM_COMMAND,
+    WM_CONTEXTMENU, WM_DESTROY, WM_ENDSESSION, WM_LBUTTONDBLCLK, WM_NULL, WM_RBUTTONUP, WNDCLASSW,
 };
 
 /// Set on the tray process so it knows it is the copy, not the launcher.
@@ -94,6 +95,8 @@ const ID_RESTART: usize = 1;
 const ID_QUIT: usize = 2;
 const ID_CONNECTIONS: usize = 3;
 const ID_VERSION: usize = 4;
+const ID_OPEN: usize = 5;
+const ID_ADDRESS: usize = 6;
 const WM_TRAY: u32 = WM_APP + 1;
 /// Posted by a second copy to the running one: open the dashboard.
 const WM_OPEN_DASHBOARD: u32 = WM_APP + 2;
@@ -103,7 +106,7 @@ const WM_OPEN_DASHBOARD: u32 = WM_APP + 2;
 const INSTANCE_MUTEX: &str = "Global\\VigilCollector";
 /// Start of the tray window's title, which is followed by the dashboard
 /// URL so a second copy can say where the running one is.
-const WINDOW_TITLE: &str = "Vigil Collector ";
+const WINDOW_TITLE: &str = "Vigil ";
 
 /// ``DETACHED_PROCESS``: the copy gets no console at all, so nothing
 /// flashes on screen and closing the terminal doesn't stop it.
@@ -185,7 +188,7 @@ pub fn launch(color: bool) -> ! {
         eprintln!("{message}");
         if double_clicked {
             let text = wide(message.trim());
-            let caption = wide("Vigil Collector");
+            let caption = wide("Vigil");
             // SAFETY: both strings are NUL-terminated and outlive the call.
             unsafe {
                 MessageBoxW(
@@ -387,10 +390,10 @@ fn show_running() -> bool {
 fn already_running_message() -> String {
     match running_url() {
         Some(url) => format!(
-            "Vigil Collector is already running at {url}. Use its tray icon to \
-             restart or quit it."
+            "Vigil is already running at {url}. Use its tray icon to restart \
+             or quit it."
         ),
-        None => "Vigil Collector is already running on this computer.".into(),
+        None => "Vigil is already running on this computer.".into(),
     }
 }
 
@@ -537,19 +540,7 @@ fn run(
             return;
         }
 
-        let size = GetSystemMetrics(SM_CXSMICON).max(16);
-        let hicon = match crate::ico::pick(ICON, size as u32) {
-            Some(range) => CreateIconFromResourceEx(
-                ICON[range.clone()].as_ptr(),
-                range.len() as u32,
-                1,
-                0x0003_0000,
-                size,
-                size,
-                LR_DEFAULTCOLOR,
-            ),
-            None => std::ptr::null_mut(),
-        };
+        let hicon = load_icon(GetSystemMetrics(SM_CXSMICON).max(16));
 
         let mut icon = NOTIFYICONDATAW {
             cbSize: size_of::<NOTIFYICONDATAW>() as u32,
@@ -561,7 +552,7 @@ fn run(
             ..Default::default()
         };
         icon.Anonymous.uVersion = NOTIFYICON_VERSION_4;
-        let tooltip = format!("Vigil Collector\n{url}");
+        let tooltip = format!("Vigil\n{url}");
         let tip: Vec<u16> = tooltip.encode_utf16().take(icon.szTip.len() - 1).collect();
         icon.szTip[..tip.len()].copy_from_slice(&tip);
 
@@ -598,53 +589,87 @@ fn run(
     }
 }
 
+/// The Vigil logo as an icon ``size`` pixels square, from the image in
+/// ``favicon.ico`` that suits that size best. Null if it couldn't be made.
+fn load_icon(size: i32) -> HICON {
+    let Some(range) = crate::ico::pick(ICON, size as u32) else {
+        return std::ptr::null_mut();
+    };
+    // SAFETY: the pointer and length describe one image inside ICON.
+    unsafe {
+        CreateIconFromResourceEx(
+            ICON[range.clone()].as_ptr(),
+            range.len() as u32,
+            1,
+            0x0003_0000,
+            size,
+            size,
+            LR_DEFAULTCOLOR,
+        )
+    }
+}
+
 /// Shows the menu at the pointer. The menu posts WM_COMMAND back to the
 /// window when an item is chosen.
 ///
 /// ```text
-/// Restart
-/// Quit
-/// ─────────────────────────────────────
-/// ● 1 connected
-/// Vigil Collector - Monitoring - v0.2.0
+/// [logo] Open dashboard              (bold: what a double-click does)
+/// ──────────────────────────────────
+///  (●)   Monitoring · 1 dashboard connected
+///        http://127.0.0.1:4500       (greyed)
+/// ──────────────────────────────────
+///        Restart
+///        Quit
+/// ──────────────────────────────────
+///        Vigil v0.2.0                (greyed)
 /// ```
 unsafe fn show_menu(hwnd: HWND) {
-    let Some(connections) =
-        STATE.with_borrow(|s| s.as_ref().map(|s| s.connections.load(Ordering::Acquire)))
-    else {
+    let Some((connections, url)) = STATE.with_borrow(|s| {
+        s.as_ref()
+            .map(|s| (s.connections.load(Ordering::Acquire), s.url.clone()))
+    }) else {
         return;
     };
+    let open = wide("Open dashboard");
+    let status = wide(status_text(connections));
     let restart = wide("Restart");
     let quit = wide("Quit");
-    let connected = wide(format!("{connections} connected"));
-    let title = wide(format!(
-        "Vigil Collector - Monitoring - v{}",
-        env!("CARGO_PKG_VERSION")
-    ));
+    let version = wide(format!("Vigil v{}", env!("CARGO_PKG_VERSION")));
     // SAFETY (caller): called on the tray thread with its live window.
     unsafe {
         let menu = CreatePopupMenu();
         if menu.is_null() {
             return;
         }
+        AppendMenuW(menu, MF_STRING, ID_OPEN, open.as_ptr());
+        SetMenuDefaultItem(menu, ID_OPEN as u32, 0);
+        AppendMenuW(menu, MF_SEPARATOR, 0, std::ptr::null());
+        // Not greyed, or Windows draws the green dot grey too. Clicking it
+        // does nothing.
+        AppendMenuW(menu, MF_STRING, ID_CONNECTIONS, status.as_ptr());
+        AppendMenuW(menu, MF_STRING | MF_GRAYED, ID_ADDRESS, url.as_ptr());
+        AppendMenuW(menu, MF_SEPARATOR, 0, std::ptr::null());
         AppendMenuW(menu, MF_STRING, ID_RESTART, restart.as_ptr());
         AppendMenuW(menu, MF_STRING, ID_QUIT, quit.as_ptr());
         AppendMenuW(menu, MF_SEPARATOR, 0, std::ptr::null());
-        AppendMenuW(menu, MF_STRING, ID_CONNECTIONS, connected.as_ptr());
-        AppendMenuW(menu, MF_STRING | MF_GRAYED, ID_VERSION, title.as_ptr());
+        AppendMenuW(menu, MF_STRING | MF_GRAYED, ID_VERSION, version.as_ptr());
 
-        // The dot is sized for the menu's DPI, in the column where menus
-        // put item icons.
+        // The logo and the dot go in the column where menus put item
+        // icons, which also lines every item's text up after it. Both are
+        // sized for the menu's DPI.
         let size = GetSystemMetricsForDpi(SM_CXSMICON, GetDpiForWindow(hwnd)).max(16);
-        let dot = dot_bitmap(size);
-        if !dot.is_null() {
-            let item = MENUITEMINFOW {
-                cbSize: size_of::<MENUITEMINFOW>() as u32,
-                fMask: MIIM_BITMAP,
-                hbmpItem: dot,
-                ..Default::default()
-            };
-            SetMenuItemInfoW(menu, ID_CONNECTIONS as u32, 0, &item);
+        let logo = logo_bitmap(size);
+        let dot = bitmap_from_pixels(size, &dot_pixels(size as usize));
+        for (id, bitmap) in [(ID_OPEN, logo), (ID_CONNECTIONS, dot)] {
+            if !bitmap.is_null() {
+                let item = MENUITEMINFOW {
+                    cbSize: size_of::<MENUITEMINFOW>() as u32,
+                    fMask: MIIM_BITMAP,
+                    hbmpItem: bitmap,
+                    ..Default::default()
+                };
+                SetMenuItemInfoW(menu, id as u32, 0, &item);
+            }
         }
 
         let mut pt = POINT { x: 0, y: 0 };
@@ -654,9 +679,20 @@ unsafe fn show_menu(hwnd: HWND) {
         TrackPopupMenu(menu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd, std::ptr::null());
         PostMessageW(hwnd, WM_NULL, 0, 0);
         DestroyMenu(menu);
-        if !dot.is_null() {
-            DeleteObject(dot);
+        for bitmap in [logo, dot] {
+            if !bitmap.is_null() {
+                DeleteObject(bitmap);
+            }
         }
+    }
+}
+
+/// The menu's status line for ``connections`` open dashboards.
+fn status_text(connections: usize) -> String {
+    match connections {
+        0 => "Monitoring \u{b7} no dashboards connected".into(),
+        1 => "Monitoring \u{b7} 1 dashboard connected".into(),
+        n => format!("Monitoring \u{b7} {n} dashboards connected"),
     }
 }
 
@@ -679,23 +715,14 @@ fn open_dashboard() {
     }
 }
 
-/// A 32-bit bitmap of the green dot, ``size`` pixels square, which menus
-/// draw with its transparency. Null if it couldn't be made.
-fn dot_bitmap(size: i32) -> HBITMAP {
-    let pixels = dot_pixels(size as usize);
-    let info = BITMAPINFO {
-        bmiHeader: BITMAPINFOHEADER {
-            biSize: size_of::<BITMAPINFOHEADER>() as u32,
-            biWidth: size,
-            // Negative: rows run top to bottom, like ``pixels``.
-            biHeight: -size,
-            biPlanes: 1,
-            biBitCount: 32,
-            biCompression: BI_RGB,
-            ..Default::default()
-        },
-        ..Default::default()
-    };
+/// A 32-bit bitmap, ``size`` pixels square, from premultiplied BGRA
+/// ``pixels`` in rows from the top. Menus draw it with its transparency.
+/// Null if it couldn't be made.
+fn bitmap_from_pixels(size: i32, pixels: &[u32]) -> HBITMAP {
+    if pixels.len() != (size * size) as usize {
+        return std::ptr::null_mut();
+    }
+    let info = bitmap_info(size);
     let mut bits: *mut std::ffi::c_void = std::ptr::null_mut();
     // SAFETY: ``bits`` receives a buffer of size * size 32-bit pixels,
     // which is exactly what's copied into it.
@@ -713,6 +740,75 @@ fn dot_bitmap(size: i32) -> HBITMAP {
         }
         bitmap
     }
+}
+
+/// Describes a top-down 32-bit bitmap ``size`` pixels square.
+fn bitmap_info(size: i32) -> BITMAPINFO {
+    BITMAPINFO {
+        bmiHeader: BITMAPINFOHEADER {
+            biSize: size_of::<BITMAPINFOHEADER>() as u32,
+            biWidth: size,
+            // Negative: rows run top to bottom.
+            biHeight: -size,
+            biPlanes: 1,
+            biBitCount: 32,
+            biCompression: BI_RGB,
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
+/// The logo as a menu bitmap: the icon's colour pixels, read back from
+/// the icon Windows made, with their alpha premultiplied as menus expect.
+fn logo_bitmap(size: i32) -> HBITMAP {
+    let hicon = load_icon(size);
+    if hicon.is_null() {
+        return std::ptr::null_mut();
+    }
+    let mut pixels = vec![0u32; (size * size) as usize];
+    // SAFETY: GetIconInfo hands back two bitmaps this function owns and
+    // deletes; GetDIBits writes at most size rows of size pixels into
+    // ``pixels``, as ``info`` describes.
+    let read = unsafe {
+        let mut icon_info: ICONINFO = std::mem::zeroed();
+        let ok = GetIconInfo(hicon, &mut icon_info) != 0 && !icon_info.hbmColor.is_null();
+        let mut rows = 0;
+        if ok {
+            let mut info = bitmap_info(size);
+            let dc = GetDC(std::ptr::null_mut());
+            rows = GetDIBits(
+                dc,
+                icon_info.hbmColor,
+                0,
+                size as u32,
+                pixels.as_mut_ptr().cast(),
+                &mut info,
+                DIB_RGB_COLORS,
+            );
+            ReleaseDC(std::ptr::null_mut(), dc);
+        }
+        for bitmap in [icon_info.hbmColor, icon_info.hbmMask] {
+            if !bitmap.is_null() {
+                DeleteObject(bitmap);
+            }
+        }
+        DestroyIcon(hicon);
+        rows == size
+    };
+    // An icon without an alpha channel reads back fully transparent.
+    if !read || pixels.iter().all(|p| p >> 24 == 0) {
+        return std::ptr::null_mut();
+    }
+    let pixels: Vec<u32> = pixels.into_iter().map(premultiply).collect();
+    bitmap_from_pixels(size, &pixels)
+}
+
+/// Premultiplies one BGRA pixel's colour by its alpha.
+fn premultiply(pixel: u32) -> u32 {
+    let a = pixel >> 24;
+    let scale = |shift: u32| ((pixel >> shift & 0xff) * a / 255) << shift;
+    a << 24 | scale(16) | scale(8) | scale(0)
 }
 
 /// The dot's pixels, row by row from the top, as premultiplied BGRA (the
@@ -771,6 +867,7 @@ unsafe extern "system" fn window_proc(
                 match wparam & 0xFFFF {
                     ID_RESTART => send(TrayEvent::Restart),
                     ID_QUIT => send(TrayEvent::Quit),
+                    ID_OPEN => open_dashboard(),
                     _ => {}
                 }
                 0
@@ -804,7 +901,7 @@ unsafe extern "system" fn window_proc(
 
 #[cfg(test)]
 mod tests {
-    use super::{DOT_RGB, dot_pixels, strip_ansi};
+    use super::{DOT_RGB, dot_pixels, premultiply, status_text, strip_ansi};
 
     #[test]
     fn strips_colour_codes() {
@@ -812,6 +909,20 @@ mod tests {
             strip_ansi("\x1b[2m[2026-11-11]\x1b[0m \x1b[32m INFO\x1b[0m Listening"),
             "[2026-11-11]  INFO Listening"
         );
+    }
+
+    #[test]
+    fn counts_dashboards_in_words() {
+        assert_eq!(status_text(0), "Monitoring \u{b7} no dashboards connected");
+        assert_eq!(status_text(1), "Monitoring \u{b7} 1 dashboard connected");
+        assert_eq!(status_text(3), "Monitoring \u{b7} 3 dashboards connected");
+    }
+
+    #[test]
+    fn premultiplies_colour_by_alpha() {
+        assert_eq!(premultiply(0xff10_2030), 0xff10_2030);
+        assert_eq!(premultiply(0x00ff_ffff), 0);
+        assert_eq!(premultiply(0x80ff_0000), 0x8080_0000);
     }
 
     #[test]

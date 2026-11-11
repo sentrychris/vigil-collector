@@ -4,9 +4,8 @@
 
 <h1 align="center">Vigil dashboard</h1>
 
-The live dashboard for [Vigil Collector](../README.md). It's a Vue 3 +
-TypeScript app built with Vite, and the collector embeds the built files
-in its binary and serves them at `/`. You don't deploy it separately.
+The live dashboard for [Vigil](../README.md). It's a Vue 3 + TypeScript
+app built with Vite, and Vigil embeds the built files in its binary and serves them at `/`. You don't deploy it separately.
 
 `cargo build` in the repository root builds it for you (see
 [build.rs](../build.rs)), so you only need these commands while working on
@@ -14,7 +13,7 @@ the dashboard itself.
 
 ## Working on it
 
-Requirements: Node.js 18 or newer with npm, and a running collector.
+Requirements: Node.js 18 or newer with npm, and Vigil running.
 
 ```sh
 npm ci
@@ -22,7 +21,7 @@ npm run dev          # http://localhost:8888, hot reload
 ```
 
 The dev server forwards the API (`/system`, `/network`, `/probes`,
-`/worker` and the `/connect` WebSocket) to a collector on
+`/worker` and the `/connect` WebSocket) to Vigil on
 `127.0.0.1:4500`. Start one with `cargo run` in the repository root, or
 point the dev server at another one in `.env`:
 
@@ -50,7 +49,7 @@ All optional, read at build time from `.env` (see
 | `VITE_DEPLOY_REGION`, `VITE_DEPLOY_INSTANCE` | empty | Labels shown as chips in the navbar and footer |
 | `VITE_CONNECTION_TYPE` | `websocket` | `websocket` for live data, `http` for a snapshot refreshed every 30 s. The navbar switch overrides it per browser |
 
-The dashboard always talks to the collector that served it, so there are
+The dashboard always talks to the Vigil instance that served it, so there are
 no API URL settings.
 
 ## Live and static modes

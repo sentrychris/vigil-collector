@@ -1,8 +1,9 @@
-# Vigil Collector
+# Vigil
 
-A lightweight system and network monitoring server with a built-in live
-dashboard. Stream host metrics to the dashboard, or to any client over HTTP
-or WebSocket.
+A system monitoring utility with remote connection capabilities. Vigil
+watches a machine's processor, memory, disks, network and processes, and
+serves them to its built-in live dashboard, or to any client over HTTP or
+WebSocket, on the same machine or across your network.
 
 <img width="1920" height="1016" alt="image" src="https://github.com/user-attachments/assets/4634aa3a-21ee-4629-a76e-feb669e48e38" />
 
@@ -48,7 +49,7 @@ Node.js; platform-specific setup is under [Building](#building).
 
 ## Building
 
-Vigil Collector builds from the same source on Linux, Windows and macOS.
+Vigil builds from the same source on Linux, Windows and macOS.
 Every platform needs:
 
 - **Rust 1.95 or newer.** Install it with [rustup](https://rustup.rs); if you
@@ -184,7 +185,7 @@ vigil-collector --address 0.0.0.0 --port 4500    # listen on every interface
 vigil-collector --help
 ```
 
-By default the collector listens on `localhost:4500`, so only the same
+By default Vigil listens on `localhost:4500`, so only the same
 machine can reach it. Use `--address 0.0.0.0` (or set `address` in the
 [settings file](#configuration)) to serve other machines on your network.
 On Windows, the first time it listens on a non-local address, Windows
@@ -207,13 +208,13 @@ crash.
 
 ### The system tray on Windows
 
-On Windows the collector runs in the background with an icon in the
-notification area. Right-click the icon for **Restart** and **Quit**,
-below which it shows how many dashboards are connected and the version.
-Double-click the icon to open the dashboard in your browser. Restart
-starts it again with the same options and re-reads the settings file. The
-executable has the same icon, and its Properties > Details tab shows the
-version.
+On Windows, Vigil runs in the background with an icon in the
+notification area. Double-click the icon to open the dashboard in your
+browser. Right-click it for a menu with **Open dashboard**, how many
+dashboards are connected and the address, **Restart** and **Quit**, and
+the version. Restart starts it again with the same options and re-reads
+the settings file. The executable has the same icon, and its Properties >
+Details tab shows the version.
 
 - **Double-clicked**, it goes straight to the tray, with no console
   window. If its port (4500 unless the settings file says otherwise) is
@@ -224,7 +225,7 @@ version.
   `Listening on ...` line, then gives you the prompt back while it keeps
   running in the tray. Closing the terminal doesn't stop it. Here, and
   whenever `--port` is given, the port is used exactly as set: if it's
-  taken, the collector stops with an error.
+  taken, Vigil stops with an error.
 - **`--foreground`** keeps it in the console instead, with no tray icon,
   as on Linux and macOS. It also stays in the console on its own when its
   output is redirected to a file or pipe, and when it runs as a service
@@ -272,9 +273,9 @@ $action = New-ScheduledTaskAction -Execute $exe -Argument "--foreground --addres
 $trigger = New-ScheduledTaskTrigger -AtStartup
 $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) `
     -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
-Register-ScheduledTask -TaskName "Vigil Collector" -Action $action -Trigger $trigger `
+Register-ScheduledTask -TaskName "Vigil" -Action $action -Trigger $trigger `
     -Settings $settings -User "SYSTEM" -RunLevel Highest
-Start-ScheduledTask -TaskName "Vigil Collector"
+Start-ScheduledTask -TaskName "Vigil"
 ```
 
 Running as `SYSTEM`, its home folder is
@@ -287,15 +288,15 @@ listen on `0.0.0.0`, add an inbound rule for the exe (same elevated
 PowerShell):
 
 ```powershell
-New-NetFirewallRule -DisplayName "Vigil Collector" -Direction Inbound `
+New-NetFirewallRule -DisplayName "Vigil" -Direction Inbound `
     -Program $exe -Action Allow -Profile Private
 ```
 
 To remove the task and the rule:
 
 ```powershell
-Unregister-ScheduledTask -TaskName "Vigil Collector" -Confirm:$false
-Remove-NetFirewallRule -DisplayName "Vigil Collector"
+Unregister-ScheduledTask -TaskName "Vigil" -Confirm:$false
+Remove-NetFirewallRule -DisplayName "Vigil"
 ```
 
 ### macOS (launchd)
@@ -325,8 +326,7 @@ the binary path, then run
 
 A settings file is created with defaults on first run. All keys are
 optional; a missing key takes its default, and a file that doesn't parse is
-reported in the log and ignored, so a typo never stops the collector
-starting.
+reported in the log and ignored, so a typo never stops Vigil starting.
 
 | | Linux / macOS | Windows |
 |---|---|---|
@@ -375,7 +375,7 @@ The dashboard. Its files are baked into the binary, so there's no
 extraction on startup and no static-files directory to manage. Any GET
 path the API doesn't use serves the dashboard too, so its client-side
 routes survive a reload. The dashboard connects back to whichever
-collector served it.
+Vigil instance served it.
 
 ### `POST /worker`
 
@@ -486,8 +486,8 @@ WebSocket frees it. A connect refused with `503` (server at
 | Process memory | PSS when readable, else RSS | working set | RSS |
 | Dropped packets | yes | `0` | `0` |
 
-Nothing needs admin/root on any platform. Running as root on Linux lets the
-collector read PSS for every process instead of only your own.
+Nothing needs admin/root on any platform. Running as root on Linux lets
+Vigil read PSS for every process instead of only your own.
 
 On Windows, network throughput leaves out NDIS filter interfaces (such as
 "WiFi-VirtualBox NDIS Light-Weight Filter-0000"), which mirror the adapter
@@ -498,19 +498,18 @@ virtual switches are kept, like `docker0` on Linux.
 
 Windows has no built-in way for a program to read the CPU's own
 temperature sensor without a kernel driver, which is why Task Manager
-doesn't show it. The collector doesn't ship a driver. Instead it checks
+doesn't show it. Vigil doesn't ship a driver. Instead it checks
 these once a second and uses the first that has a reading:
 
 1. **HWiNFO**, with *Shared Memory Support* turned on in its settings. The
    free version switches this off again after 12 hours.
-2. **MSI Afterburner**. It has to run in the same Windows session as the
-   collector, so this doesn't work when the collector runs as a `SYSTEM`
-   task.
+2. **MSI Afterburner**. It has to run in the same Windows session as
+   Vigil, so this doesn't work when Vigil runs as a `SYSTEM` task.
 3. **LibreHardwareMonitor** (or OpenHardwareMonitor), through its WMI
    sensors.
 4. **The ACPI thermal zone** Windows exposes itself. Many desktops report a
    fixed placeholder there (often 27.85 °C), so a zone is only used once
-   its value has changed since the collector started. On laptops it is
+   its value has changed since Vigil started. On laptops it is
    often real, but it may be a board or chassis sensor rather than the CPU
    package.
 
@@ -536,7 +535,7 @@ npx vitest run --environment jsdom --root src/   # unit tests
 ```
 
 `npm run dev` forwards `/system`, `/worker`, `/connect` and the other API
-paths to a collector on `127.0.0.1:4500`, so run one alongside it
+paths to Vigil on `127.0.0.1:4500`, so run it alongside
 (`cargo run`), or point it elsewhere with `VIGIL_COLLECTOR_URL` in
 `web/.env` (see [web/.env.example](web/.env.example)). Set
 `VIGIL_SKIP_WEB_BUILD=1` to make `cargo build` reuse an existing

@@ -4,7 +4,7 @@ use clap::Parser;
 #[command(
     name = "vigil-collector",
     version,
-    about = "Lightweight system and network monitoring server."
+    about = "Vigil: a system monitoring utility with remote connection capabilities."
 )]
 pub struct Cli {
     /// Listen address for the HTTP/WS server (overrides settings.json).
