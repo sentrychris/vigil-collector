@@ -1,6 +1,6 @@
 use axum::body::Body;
 use axum::extract::State;
-use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use bytes::Bytes;
 use rust_embed::Embed;
@@ -9,25 +9,43 @@ use serde::Serialize;
 use super::AppState;
 use super::probes;
 
+/// The Vue dashboard (``web/``), built by build.rs into ``web/dist``.
 #[derive(Embed)]
-#[folder = "assets/"]
-struct Assets;
+#[folder = "web/dist/"]
+struct Dashboard;
 
+/// Serve a file from the dashboard build. Vite fingerprints everything
+/// under ``assets/`` so it can be cached for good; the rest (index.html,
+/// favicon, images) is revalidated so a new collector version shows up on
+/// the next load.
 fn embedded(path: &str) -> Option<Response> {
-    let asset = Assets::get(path)?;
-    let mime = HeaderValue::from_str(asset.metadata.mimetype())
+    let file = Dashboard::get(path)?;
+    let mime = HeaderValue::from_str(file.metadata.mimetype())
         .unwrap_or(HeaderValue::from_static("application/octet-stream"));
-    let mut res = Response::new(Body::from(asset.data));
+    let cache = if path.starts_with("assets/") {
+        HeaderValue::from_static("public, max-age=31536000, immutable")
+    } else {
+        HeaderValue::from_static("no-cache")
+    };
+    let mut res = Response::new(Body::from(file.data));
     res.headers_mut().insert(header::CONTENT_TYPE, mime);
+    res.headers_mut().insert(header::CACHE_CONTROL, cache);
     Some(res)
 }
 
-pub async fn serve_index() -> Response {
-    embedded("web.html").unwrap_or_else(|| (StatusCode::NOT_FOUND, "index missing").into_response())
-}
-
-pub async fn serve_favicon() -> Response {
-    embedded("favicon.ico").unwrap_or_else(|| (StatusCode::NOT_FOUND, "no favicon").into_response())
+/// Any GET the API doesn't handle: a dashboard file if one matches, else
+/// the dashboard itself so client-side routes survive a reload. Missing
+/// fingerprinted assets stay a real 404 rather than a page of HTML.
+pub async fn dashboard(uri: Uri) -> Response {
+    let path = uri.path().trim_start_matches('/');
+    if let Some(res) = embedded(path) {
+        return res;
+    }
+    if path.starts_with("assets/") {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    embedded("index.html")
+        .unwrap_or_else(|| (StatusCode::NOT_FOUND, "dashboard missing").into_response())
 }
 
 pub async fn preflight() -> StatusCode {

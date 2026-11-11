@@ -11,7 +11,8 @@ export const config: Configuration = {
     base_url: import.meta.env.BASE_URL,
     name: import.meta.env.VITE_APP_NAME || "Vigil",
     title: import.meta.env.VITE_APP_TITLE || "System Monitor",
-    version: APP_VERSION,
+    // Set by the collector's build.rs so the footer shows its version.
+    version: import.meta.env.VITE_APP_VERSION || APP_VERSION,
     deployment: {
       region: import.meta.env.VITE_DEPLOY_REGION || "",
       instance: import.meta.env.VITE_DEPLOY_INSTANCE || "",

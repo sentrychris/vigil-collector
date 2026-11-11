@@ -42,10 +42,12 @@ src/
 │   └── process.rs       top-N by memory and by CPU, PSS-or-RSS detection
 ├── server/              axum HTTP + WS layer
 │   ├── mod.rs           router, AppState, serve()
-│   ├── http.rs          GET /system, /network, /probes, embedded /, /favicon
+│   ├── http.rs          GET /system, /network, /probes; embedded dashboard fallback
 │   ├── ws.rs            WebSocket upgrade and per-client push loop
 │   ├── worker.rs        single-use 5-second token registry for WS handshake
 │   └── probes.rs        external HTTP health checks (parallel reqwest)
+build.rs                 runs `npm ci` / `vite build` in web/ so the binary can embed web/dist
+web/                     the Vue dashboard (Vite + TypeScript), served at / from the binary
 ```
 
 ## Platform support

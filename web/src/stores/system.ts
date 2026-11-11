@@ -70,9 +70,12 @@ export const useSystemStore = defineStore("system", {
             this.staticUpdate(data);
             this.connected = true;
             if (websocket) {
+              this.stopPollingApi();
               this.websocket();
-            } else if (!refresh) {
-              loader.toggle(true);
+            } else {
+              // Static mode re-reads /system on a timer.
+              this.startPollingApi(config.services.pollInterval);
+              if (!refresh) loader.toggle(true);
             }
           })
           .catch(() => {

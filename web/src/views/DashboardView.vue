@@ -31,6 +31,11 @@ const processesData = computed(() =>
     : system.data.processes,
 );
 
+// Scale the memory chart to this host's RAM rather than a fixed 16 GiB.
+const memAxisMax = computed(() =>
+  Math.max(1, Math.ceil(system.realtime.mem.total || system.data.mem?.total || 16)),
+);
+
 onBeforeMount(() => {
   const connectionType = system.connectionType ?? config.api.connectionType;
   system.connect({ websocket: connectionType === "websocket", refresh: false });
@@ -207,7 +212,7 @@ onBeforeMount(() => {
               <div class="panel-body p-0">
                 <RealtimeLineChart
                   :data-point="system.realtime.mem.used"
-                  :y-axis-range="[0, 16]"
+                  :y-axis-range="[0, memAxisMax]"
                   tone="amber"
                   unit="GiB"
                   :decimals="1"

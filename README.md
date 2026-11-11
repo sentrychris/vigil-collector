@@ -1,12 +1,13 @@
 # Vigil Collector
 
-A lightweight system and network monitoring server. Stream live host metrics to
-any client over HTTP or WebSocket.
+A lightweight system and network monitoring server with a built-in live
+dashboard. Stream host metrics to the dashboard, or to any client over HTTP
+or WebSocket.
 
 <img width="1920" height="1016" alt="image" src="https://github.com/user-attachments/assets/4634aa3a-21ee-4629-a76e-feb669e48e38" />
 
-See it powering a real dashboard [here](https://status.edcs.app), paired with
-[Vigil UI](https://github.com/sentrychris/vigil), the comprehensive frontend.
+See it running [here](https://status.edcs.app). The dashboard is the Vue app
+in [web/](web/), built into the binary, so there's nothing else to deploy.
 
 ## Contents
 
@@ -28,9 +29,9 @@ cd vigil-collector
 cargo run --release
 ```
 
-Then open <http://localhost:4500> for the built-in dashboard, or
-<http://localhost:4500/system> for the raw JSON. Platform-specific setup is
-under [Building](#building).
+Then open <http://localhost:4500> for the dashboard, or
+<http://localhost:4500/system> for the raw JSON. Building needs Rust and
+Node.js; platform-specific setup is under [Building](#building).
 
 ## What you get
 
@@ -55,10 +56,13 @@ Every platform needs:
 - **A C compiler.** The TLS library (`ring`, used for `/probes`) compiles a
   small amount of C and assembly. There's no OpenSSL, CMake or NASM
   dependency.
+- **Node.js 18 or newer, with npm.** `cargo build` builds the dashboard in
+  [web/](web/) through [build.rs](build.rs): `npm ci` the first time, then
+  `vite build` whenever a file in `web/` changes. Check with `node --version`.
 
-The release binary is self-contained: the dashboard HTML and favicon are
-embedded, and nothing else needs to ship alongside it. It's about 5 MB
-stripped.
+The release binary is self-contained: the dashboard is embedded, and
+nothing else needs to ship alongside it. It's about 6 MB stripped. Node is
+only needed to build it, not to run it.
 
 ### Linux
 
@@ -74,6 +78,10 @@ sudo pacman -S base-devel curl git
 
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
+
+Install Node.js 18 or newer. Distro packages are often older, so check
+`node --version`; [nodejs.org](https://nodejs.org/en/download) lists
+up-to-date packages and installers (or use `nvm`).
 
 Build and run:
 
@@ -101,7 +109,10 @@ sudo install -m 755 target/release/vigil-collector /usr/local/bin/
    [rustup-init.exe](https://win.rustup.rs/x86_64) (or
    `winget install Rustlang.Rustup`), accepting the default
    `x86_64-pc-windows-msvc` toolchain.
-3. Build and run from PowerShell:
+3. Install Node.js LTS from [nodejs.org](https://nodejs.org) (or
+   `winget install OpenJS.NodeJS.LTS`). Open a new terminal afterwards so
+   `npm` is on `PATH`.
+4. Build and run from PowerShell:
 
 ```powershell
 git clone https://github.com/sentrychris/vigil-collector
@@ -121,11 +132,13 @@ rights are needed to run it.
 
 ### macOS
 
-Install the Xcode command line tools and Rust, then build as on Linux:
+Install the Xcode command line tools, Rust and Node.js, then build as on
+Linux:
 
 ```sh
 xcode-select --install
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+brew install node                  # or the installer from nodejs.org
 
 git clone https://github.com/sentrychris/vigil-collector
 cd vigil-collector
@@ -158,7 +171,8 @@ cargo build --release --target x86_64-pc-windows-gnu
 # -> target/x86_64-pc-windows-gnu/release/vigil-collector.exe
 ```
 
-The `x86_64-pc-windows-msvc` target can't be cross-compiled from Linux this
+The dashboard is plain HTML/JS, so the Linux machine's Node builds it for
+any target. The `x86_64-pc-windows-msvc` target can't be cross-compiled from Linux this
 way (ring needs `clang-cl` for it). Build MSVC binaries on Windows, or use
 the GNU target above; both behave the same at runtime.
 
@@ -319,8 +333,11 @@ Example:
 
 ### `GET /`
 
-Built-in dashboard at `:4500`. The bundle (HTML, favicon) is baked into the
-binary - no extraction on startup, no static-files directory to manage.
+The dashboard. Its files are baked into the binary, so there's no
+extraction on startup and no static-files directory to manage. Any GET
+path the API doesn't use serves the dashboard too, so its client-side
+routes survive a reload. The dashboard connects back to whichever
+collector served it.
 
 ### `POST /worker`
 
@@ -471,10 +488,26 @@ cargo test                                  # unit tests
 RUST_LOG=vigil_collector=debug cargo run    # run with debug logging
 ```
 
-CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs all of
-these on Linux, Windows and macOS, then starts the release binary and
-checks that `/system`, `/network`, `/worker` and the dashboard respond with
-the expected payload. Platform-specific code lives behind `#[cfg(...)]` in
+The dashboard has its own tools in [web/](web/):
+
+```sh
+cd web
+npm run dev          # dashboard on :8888 with hot reload
+npm run type-check   # vue-tsc
+npx vitest run --environment jsdom --root src/   # unit tests
+```
+
+`npm run dev` forwards `/system`, `/worker`, `/connect` and the other API
+paths to a collector on `127.0.0.1:4500`, so run one alongside it
+(`cargo run`), or point it elsewhere with `VIGIL_COLLECTOR_URL` in
+`web/.env` (see [web/.env.example](web/.env.example)). Set
+`VIGIL_SKIP_WEB_BUILD=1` to make `cargo build` reuse an existing
+`web/dist` instead of rebuilding it.
+
+CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) type-checks and
+unit-tests the dashboard, runs the Rust checks on Linux, Windows and macOS,
+then starts the release binary and checks that `/system`, `/network`,
+`/worker` and the dashboard (page and assets) respond. Platform-specific code lives behind `#[cfg(...)]` in
 `src/metrics/` and `src/log.rs`; if you change it, cross-check the other
 targets:
 

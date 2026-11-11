@@ -42,8 +42,6 @@ pub fn router(state: AppState) -> Router {
         .allow_headers(Any);
 
     Router::new()
-        .route("/", get(http::serve_index))
-        .route("/favicon.ico", get(http::serve_favicon))
         .route(
             "/worker",
             post(http::create_worker).options(http::preflight),
@@ -52,6 +50,7 @@ pub fn router(state: AppState) -> Router {
         .route("/network", get(http::network).options(http::preflight))
         .route("/probes", get(http::probes).options(http::preflight))
         .route("/connect", get(ws::connect))
+        .fallback(get(http::dashboard))
         .layer(cors)
         .with_state(state)
 }

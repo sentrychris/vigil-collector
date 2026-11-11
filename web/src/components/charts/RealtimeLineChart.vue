@@ -294,6 +294,13 @@ watch(
   () => draw(),
 );
 
+// The memory chart's range follows the host's total, known only once the
+// first sample arrives.
+watch(
+  () => props.yAxisRange.join(","),
+  () => draw(),
+);
+
 onUnmounted(teardown);
 </script>
 

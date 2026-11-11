@@ -6,6 +6,28 @@ on:
   pull_request:
 
 jobs:
+  # The Vue dashboard in web/: type check and unit tests. The Rust jobs
+  # below build it again (via build.rs) to embed it.
+  dashboard:
+    name: dashboard
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - run: npm ci --no-audit --no-fund
+      - run: npm run type-check
+      - run: npx vitest run --environment jsdom --root src/
+      - run: npm run build-only
+
   build:
     name: ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
@@ -18,6 +40,12 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -53,7 +81,11 @@ jobs:
           curl -sf http://localhost:4599/system  > system.json
           curl -sf http://localhost:4599/network > network.json
           curl -sf -X POST http://localhost:4599/worker > worker.json
-          curl -sf -o /dev/null http://localhost:4599/
+          curl -sf http://localhost:4599/ > index.html
+          grep -q '<div id="app">' index.html
+          # Assets referenced by the dashboard are served from the binary.
+          asset=$(grep -o '/assets/index-[^"]*\.js' index.html | head -1)
+          curl -sf -o /dev/null "http://localhost:4599$asset"
           kill "$pid" || true
           py=python3; [ "$RUNNER_OS" = Windows ] && py=python
           "$py" - <<'PY'

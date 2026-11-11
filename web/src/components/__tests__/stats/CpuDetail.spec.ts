@@ -26,5 +26,13 @@ describe("CpuDetail", () => {
     expect(text).toContain(`${testProps.detail.usage}%`);
     expect(text).toContain(`${testProps.detail.freq} MHz`);
     expect(text).toContain(`${testProps.detail.cores} vCPU`);
+    expect(text).toContain("TEMP25.0°C");
+  });
+
+  it("shows n/a without a temperature sensor", () => {
+    const testSubject = mount(CpuDetail, {
+      props: { detail: { ...testProps.detail, temp: 0 } },
+    });
+    expect(testSubject.text()).toContain("TEMPn/a");
   });
 });

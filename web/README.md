@@ -2,94 +2,60 @@
   <img src="./logo.svg" alt="Vigil" width="120" />
 </p>
 
-<h1 align="center">Vigil</h1>
+<h1 align="center">Vigil dashboard</h1>
 
-<p align="center">A lightweight monitoring dashboard for one server, or a fleet of them.</p>
+The live dashboard for [Vigil Collector](../README.md). It's a Vue 3 +
+TypeScript app built with Vite, and the collector embeds the built files
+in its binary and serves them at `/`. You don't deploy it separately.
 
-<p align="center">View a <a href="https://status.edcs.app">live example here</a>.</p>
+`cargo build` in the repository root builds it for you (see
+[build.rs](../build.rs)), so you only need these commands while working on
+the dashboard itself.
 
-![image](./docs/dashboard.webp)
+## Working on it
 
-Vigil ships in **two modes** that share the same UI:
+Requirements: Node.js 18 or newer with npm, and a running collector.
 
-- **Host** — connects directly to one [vigil-collector](https://status.edcs.app/hub/help/fundamentals)
-  via HTTP/WebSocket and shows that host's full live dashboard. The
-  original mode; what most operators want for a single box.
-- **Hub** — connects to a [Vigil Pro](https://vigil.edcs.app#pricing)
-  Hub and surfaces a fleet view, per-host detail with sparkline metrics,
-  alert state visibility, and rule management.
+```sh
+npm ci
+npm run dev          # http://localhost:8888, hot reload
+```
 
-## Quick Start
+The dev server forwards the API (`/system`, `/network`, `/probes`,
+`/worker` and the `/connect` WebSocket) to a collector on
+`127.0.0.1:4500`. Start one with `cargo run` in the repository root, or
+point the dev server at another one in `.env`:
 
-### Requirements
+```sh
+VIGIL_COLLECTOR_URL="http://192.168.1.20:4500"
+```
 
-- [vigil-collector](https://status.edcs.app/hub/help/fundamentals) — the agent that gathers system samples.
-- [vigil-pro](https://vigil.edcs.app#pricing) (optional) — the multi-host hub. Only needed for Hub mode.
+Checks (CI runs these):
 
-1. Clone the repository
+```sh
+npm run type-check
+npx vitest run --environment jsdom --root src/
+npm run build-only   # what build.rs runs; output in dist/
+```
 
-   ```
-   git clone git@github.com:sentrychris/vigil.git
-   ```
+## Settings
 
-2. Install dependencies
+All optional, read at build time from `.env` (see
+[.env.example](.env.example)):
 
-   ```
-   npm install
-   ```
+| Variable | Default | What |
+|---|---|---|
+| `VITE_APP_NAME` | `Vigil` | Small heading above the title in the navbar |
+| `VITE_APP_TITLE` | `System Monitor` | Navbar title |
+| `VITE_DEPLOY_REGION`, `VITE_DEPLOY_INSTANCE` | empty | Labels shown as chips in the navbar and footer |
+| `VITE_CONNECTION_TYPE` | `websocket` | `websocket` for live data, `http` for a snapshot refreshed every 30 s. The navbar switch overrides it per browser |
 
-3. Copy `.env.example` to `.env` and configure your environment variables
+The dashboard always talks to the collector that served it, so there are
+no API URL settings.
 
-   ```
-   VITE_APP_NAME="Vigil"                             # Visible in the navbar, above page title
-   VITE_APP_TITLE="Metric & Monitoring"              # Visible in the navbar, page title
+## Live and static modes
 
-   VITE_APP_DEPLOY_REGION=us-central1-a              # (optional) visible in the footer
-   VITE_APP_DEPLOY_INSTANCE=chris-web1               # (optional) visible in the footer
-
-   # ─── Host mode ────────────────────────────────────────────────────
-   VITE_API_URL="http://127.0.0.1:4500"              # vigil-collector base URL
-   VITE_WORKER_URL="http://127.0.0.1:4500/worker"    # collector's worker endpoint
-   VITE_WEBSOCKET_URL="ws://127.0.0.1:4500/connect"  # collector's websocket endpoint
-   VITE_CONNECTION_TYPE="websocket"                  # "http" for static data, "websocket" for live
-
-   # ─── Hub mode (optional) ──────────────────────────────────────────
-   VITE_HUB_URL="https://hub.vigil.example.com"      # Vigil Pro Hub base URL
-   ```
-
-## Host mode
-
-The dashboard works with either static data served from standard HTTP endpoints, or live data served through websocket connections.
-
-- If you set `VITE_CONNECTION_TYPE` to `websocket`, the dashboard will load with a websocket connection configured and will display live data that updates in real time.
-
-- If you set `VITE_CONNECTION_TYPE` to `http`, the dashboard will load with data requested from an HTTP endpoint and will poll for updates every 30 seconds.
-
-There is a control switch provided at the top-right on the navbar to toggle the connection type between HTTP and Websocket.
-
-## Hub mode
-
-Setting `VITE_HUB_URL` at build time enables the hub routes. Everything
-behind them is gated by the Vigil Pro admin bearer token.
-
-| Path | What |
-|---|---|
-| `/hub`              | Fleet overview — host list, fleet alert state, recent activity, ops command popout |
-| `/hub/hosts/<id>`   | Host detail — system data sheet, health card, sparkline metrics, source footnote |
-| `/hub/rules`        | Alert rules — list, drill into rule definitions, inline delete |
-| `/hub/help`         | Alert state-machine docs (firing / breaching / OK + transitions + edge cases) |
-
-The host-detail page renders an "Open dashboard" link when the host's
-`collector_url` is set on the hub, deep-linking to that host's own
-collector dashboard for full live metrics.
-
-When Hub mode isn't configured, the navbar hides the segmented switcher
-and the routes render a "Hub mode disabled" notice.
-
-## Feedback
-
-If you have any questions or feedback, please feel free to raise an [issue here](https://github.com/sentrychris/vigil/issues).
-
-## License
-
-MIT.
+With a WebSocket connection the dashboard updates every second. In `http`
+mode it loads `/system` and polls it every 30 seconds. The switch at the
+top right of the navbar flips between the two, and the choice is
+remembered in the browser.

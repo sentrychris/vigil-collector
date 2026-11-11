@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { CpuInformation } from "@/interfaces/SystemInformation";
+import { mapTemperatureColor } from "@/utilities/color-map";
 
 defineProps<{
   detail: CpuInformation;
@@ -18,6 +19,16 @@ defineProps<{
     <div class="metric-row">
       <span class="row-label">FREQ</span>
       <span class="row-value mono">{{ detail.freq }} <span class="row-unit">MHz</span></span>
+    </div>
+    <div class="metric-row">
+      <span class="row-label">TEMP</span>
+      <!-- 0 means the host has no readable sensor (see the collector's
+           Platform notes for Windows). -->
+      <span v-if="detail.temp > 0" class="row-value mono">
+        <span :style="{ color: mapTemperatureColor(detail.temp) }">{{ detail.temp.toFixed(1) }}</span>
+        <span class="row-unit">°C</span>
+      </span>
+      <span v-else class="row-value mono row-na" title="No temperature sensor available">n/a</span>
     </div>
     <div class="metric-row">
       <span class="row-label">CORES</span>
@@ -83,6 +94,7 @@ defineProps<{
   font-feature-settings: "tnum";
   font-variant-numeric: tabular-nums;
 }
+.row-na { color: #9ca3af; }
 .row-unit { color: #9ca3af; font-weight: 500; font-size: var(--fs-micro); margin-left: 3px; }
 
 body[data-theme="dark"] .metric-value { color: var(--text-primary); }
