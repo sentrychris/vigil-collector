@@ -55,10 +55,13 @@ pub fn router(state: AppState) -> Router {
         .with_state(state)
 }
 
+/// ``active_ws`` counts the open WebSocket sessions (dashboards watching
+/// live). The caller owns it so the Windows tray menu can show it.
 pub async fn serve<F>(
     addr: SocketAddr,
     sampler: &Sampler,
     settings: &crate::config::Settings,
+    active_ws: Arc<AtomicUsize>,
     shutdown: F,
 ) -> anyhow::Result<()>
 where
@@ -73,8 +76,6 @@ where
         .build()?;
 
     let (closing_tx, closing) = watch::channel(false);
-    let active_ws = Arc::new(AtomicUsize::new(0));
-
     let state = AppState {
         sampler_json: sampler.json(),
         workers,

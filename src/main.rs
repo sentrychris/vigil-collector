@@ -12,6 +12,7 @@ mod tray;
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs};
 use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
 
 use clap::Parser;
 use tokio::sync::{Notify, mpsc};
@@ -73,13 +74,20 @@ async fn main() -> anyhow::Result<()> {
     let mut sampler = Sampler::new(settings.ws_push_interval);
     sampler.start()?;
 
+    // Open WebSocket sessions, shared with the tray menu.
+    let active_ws = Arc::new(AtomicUsize::new(0));
+
     // Menu choices from the Windows tray icon. Elsewhere (and without a
     // tray) the sender is dropped and nothing ever arrives.
     #[allow(unused_variables, unused_mut)]
     let (tray_tx, mut tray_rx) = mpsc::unbounded_channel::<TrayEvent>();
     #[cfg(windows)]
     let tray = if tray_mode {
-        match tray::Tray::start(format!("Vigil Collector\nhttp://{addr}"), tray_tx) {
+        match tray::Tray::start(
+            format!("Vigil Collector\nhttp://{addr}"),
+            tray_tx,
+            active_ws.clone(),
+        ) {
             Ok(tray) => Some(tray),
             Err(e) => {
                 tracing::warn!("No tray icon: {e}");
@@ -119,7 +127,7 @@ async fn main() -> anyhow::Result<()> {
     });
 
     let server_shutdown = shutdown.clone();
-    let serve_result = server::serve(addr, &sampler, &settings, async move {
+    let serve_result = server::serve(addr, &sampler, &settings, active_ws, async move {
         server_shutdown.notified().await;
     })
     .await;

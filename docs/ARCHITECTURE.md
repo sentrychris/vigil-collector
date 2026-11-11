@@ -49,6 +49,7 @@ src/
 │   ├── worker.rs        single-use 5-second token registry for WS handshake
 │   └── probes.rs        external HTTP health checks (parallel reqwest)
 build.rs                 runs `npm ci` / `vite build` in web/ so the binary can embed web/dist
+                         (and, for Windows targets, gives the .exe the favicon as its icon)
 web/                     the Vue dashboard (Vite + TypeScript), served at / from the binary
 ```
 
@@ -145,7 +146,9 @@ The copy runs the model above plus one OS thread, `tray`, which owns a
 hidden window, the notification-area icon and the Win32 message loop.
 Menu choices reach the signal task over an unbounded channel; Restart
 sets a flag that makes `main` start a fresh copy after the server and
-sampler have stopped and the icon is removed.
+sampler have stopped and the icon is removed. The menu's connection count
+is the server's `active_ws` counter, which `main` creates and shares with
+both.
 
 Single runtime thread for everything async. Heavy syscalls go to the blocking
 pool so the runtime thread stays unblocked.

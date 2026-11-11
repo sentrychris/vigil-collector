@@ -12,7 +12,8 @@
 //!    hides its console window straight away and shows a message box only
 //!    if the copy fails to start.
 //! 2. The copy is the *tray process*. It runs the collector as usual and
-//!    owns the icon. Its log still goes to the log file.
+//!    owns the icon. Its log still goes to the log file. The menu also
+//!    shows how many dashboards are connected and the version.
 //!
 //! ``--foreground`` skips all of this and runs in the console as before,
 //! with Ctrl-C to stop. So do services and ``SYSTEM`` scheduled tasks
@@ -25,6 +26,8 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::os::windows::ffi::OsStrExt;
 use std::os::windows::process::CommandExt;
 use std::process::{Command, Stdio};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc as std_mpsc;
 use std::thread::JoinHandle;
 
@@ -32,6 +35,9 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::TrayEvent;
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
+use windows_sys::Win32::Graphics::Gdi::{
+    BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CreateDIBSection, DIB_RGB_COLORS, DeleteObject, HBITMAP,
+};
 use windows_sys::Win32::System::Console::{
     GetConsoleMode, GetConsoleProcessList, GetConsoleWindow, GetStdHandle, STD_OUTPUT_HANDLE,
 };
@@ -39,7 +45,8 @@ use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::RemoteDesktop::ProcessIdToSessionId;
 use windows_sys::Win32::System::Threading::GetCurrentProcessId;
 use windows_sys::Win32::UI::HiDpi::{
-    DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetThreadDpiAwarenessContext,
+    DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetDpiForWindow, GetSystemMetricsForDpi,
+    SetThreadDpiAwarenessContext,
 };
 use windows_sys::Win32::UI::Shell::{
     NIF_ICON, NIF_MESSAGE, NIF_SHOWTIP, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_SETVERSION,
@@ -48,11 +55,11 @@ use windows_sys::Win32::UI::Shell::{
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreateIconFromResourceEx, CreatePopupMenu, CreateWindowExW, DefWindowProcW,
     DestroyIcon, DestroyMenu, DestroyWindow, DispatchMessageW, GetCursorPos, GetMessageW,
-    GetSystemMetrics, LR_DEFAULTCOLOR, MB_ICONERROR, MB_OK, MF_GRAYED, MF_SEPARATOR, MF_STRING,
-    MSG, MessageBoxW, PostMessageW, PostQuitMessage, RegisterClassW, RegisterWindowMessageW,
-    SM_CXSMICON, SW_HIDE, SetForegroundWindow, ShowWindow, TPM_RIGHTBUTTON, TrackPopupMenu,
-    TranslateMessage, WM_APP, WM_CLOSE, WM_COMMAND, WM_CONTEXTMENU, WM_DESTROY, WM_ENDSESSION,
-    WM_NULL, WM_RBUTTONUP, WNDCLASSW,
+    GetSystemMetrics, LR_DEFAULTCOLOR, MB_ICONERROR, MB_OK, MENUITEMINFOW, MF_GRAYED, MF_SEPARATOR,
+    MF_STRING, MIIM_BITMAP, MSG, MessageBoxW, PostMessageW, PostQuitMessage, RegisterClassW,
+    RegisterWindowMessageW, SM_CXSMICON, SW_HIDE, SetForegroundWindow, SetMenuItemInfoW,
+    ShowWindow, TPM_RIGHTBUTTON, TrackPopupMenu, TranslateMessage, WM_APP, WM_CLOSE, WM_COMMAND,
+    WM_CONTEXTMENU, WM_DESTROY, WM_ENDSESSION, WM_NULL, WM_RBUTTONUP, WNDCLASSW,
 };
 
 /// Set on the tray process so it knows it is the copy, not the launcher.
@@ -69,7 +76,8 @@ const READY_LINE: &str = "vigil-collector:listening";
 const CLASS_NAME: &str = "VigilCollectorTray";
 const ID_RESTART: usize = 1;
 const ID_QUIT: usize = 2;
-const ID_VERSION: usize = 3;
+const ID_CONNECTIONS: usize = 3;
+const ID_VERSION: usize = 4;
 const WM_TRAY: u32 = WM_APP + 1;
 
 /// ``DETACHED_PROCESS``: the copy gets no console at all, so nothing
@@ -79,6 +87,8 @@ const DETACHED_PROCESS: u32 = 0x0000_0008;
 const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
 
 const ICON: &[u8] = include_bytes!("../web/public/favicon.ico");
+/// The dot beside the connection count: the dashboard's "success" green.
+const DOT_RGB: [u8; 3] = [0x41, 0xb8, 0x83];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
@@ -277,11 +287,17 @@ pub struct Tray {
 }
 
 impl Tray {
-    pub fn start(tooltip: String, events: UnboundedSender<TrayEvent>) -> anyhow::Result<Self> {
+    /// ``connections`` is the server's count of open WebSocket sessions,
+    /// read each time the menu opens.
+    pub fn start(
+        tooltip: String,
+        events: UnboundedSender<TrayEvent>,
+        connections: Arc<AtomicUsize>,
+    ) -> anyhow::Result<Self> {
         let (ready_tx, ready_rx) = std_mpsc::channel();
         let thread = std::thread::Builder::new()
             .name("tray".into())
-            .spawn(move || run(tooltip, events, ready_tx))?;
+            .spawn(move || run(tooltip, events, connections, ready_tx))?;
         match ready_rx.recv() {
             Ok(Ok(hwnd)) => Ok(Self {
                 hwnd,
@@ -311,7 +327,7 @@ struct State {
     icon: NOTIFYICONDATAW,
     events: UnboundedSender<TrayEvent>,
     taskbar_created: u32,
-    version: Vec<u16>,
+    connections: Arc<AtomicUsize>,
 }
 
 thread_local! {
@@ -340,6 +356,7 @@ fn add_icon() {
 fn run(
     tooltip: String,
     events: UnboundedSender<TrayEvent>,
+    connections: Arc<AtomicUsize>,
     ready: std_mpsc::Sender<Result<usize, String>>,
 ) {
     // SAFETY: all calls below are plain Win32 calls on this thread, with
@@ -416,7 +433,7 @@ fn run(
             icon,
             events,
             taskbar_created: RegisterWindowMessageW(wide("TaskbarCreated").as_ptr()),
-            version: wide(format!("v{}", env!("CARGO_PKG_VERSION"))),
+            connections,
         }));
 
         if Shell_NotifyIconW(NIM_ADD, &icon) == 0 {
@@ -446,12 +463,27 @@ fn run(
 
 /// Shows the menu at the pointer. The menu posts WM_COMMAND back to the
 /// window when an item is chosen.
+///
+/// ```text
+/// Restart
+/// Quit
+/// ─────────────────────────────────────
+/// ● 1 connected
+/// Vigil Collector - Monitoring - v0.2.0
+/// ```
 unsafe fn show_menu(hwnd: HWND) {
-    let Some(version) = STATE.with_borrow(|s| s.as_ref().map(|s| s.version.clone())) else {
+    let Some(connections) =
+        STATE.with_borrow(|s| s.as_ref().map(|s| s.connections.load(Ordering::Acquire)))
+    else {
         return;
     };
     let restart = wide("Restart");
     let quit = wide("Quit");
+    let connected = wide(format!("{connections} connected"));
+    let title = wide(format!(
+        "Vigil Collector - Monitoring - v{}",
+        env!("CARGO_PKG_VERSION")
+    ));
     // SAFETY (caller): called on the tray thread with its live window.
     unsafe {
         let menu = CreatePopupMenu();
@@ -461,7 +493,22 @@ unsafe fn show_menu(hwnd: HWND) {
         AppendMenuW(menu, MF_STRING, ID_RESTART, restart.as_ptr());
         AppendMenuW(menu, MF_STRING, ID_QUIT, quit.as_ptr());
         AppendMenuW(menu, MF_SEPARATOR, 0, std::ptr::null());
-        AppendMenuW(menu, MF_STRING | MF_GRAYED, ID_VERSION, version.as_ptr());
+        AppendMenuW(menu, MF_STRING, ID_CONNECTIONS, connected.as_ptr());
+        AppendMenuW(menu, MF_STRING | MF_GRAYED, ID_VERSION, title.as_ptr());
+
+        // The dot is sized for the menu's DPI, in the column where menus
+        // put item icons.
+        let size = GetSystemMetricsForDpi(SM_CXSMICON, GetDpiForWindow(hwnd)).max(16);
+        let dot = dot_bitmap(size);
+        if !dot.is_null() {
+            let item = MENUITEMINFOW {
+                cbSize: size_of::<MENUITEMINFOW>() as u32,
+                fMask: MIIM_BITMAP,
+                hbmpItem: dot,
+                ..Default::default()
+            };
+            SetMenuItemInfoW(menu, ID_CONNECTIONS as u32, 0, &item);
+        }
 
         let mut pt = POINT { x: 0, y: 0 };
         GetCursorPos(&mut pt);
@@ -470,7 +517,74 @@ unsafe fn show_menu(hwnd: HWND) {
         TrackPopupMenu(menu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd, std::ptr::null());
         PostMessageW(hwnd, WM_NULL, 0, 0);
         DestroyMenu(menu);
+        if !dot.is_null() {
+            DeleteObject(dot);
+        }
     }
+}
+
+/// A 32-bit bitmap of the green dot, ``size`` pixels square, which menus
+/// draw with its transparency. Null if it couldn't be made.
+fn dot_bitmap(size: i32) -> HBITMAP {
+    let pixels = dot_pixels(size as usize);
+    let info = BITMAPINFO {
+        bmiHeader: BITMAPINFOHEADER {
+            biSize: size_of::<BITMAPINFOHEADER>() as u32,
+            biWidth: size,
+            // Negative: rows run top to bottom, like ``pixels``.
+            biHeight: -size,
+            biPlanes: 1,
+            biBitCount: 32,
+            biCompression: BI_RGB,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let mut bits: *mut std::ffi::c_void = std::ptr::null_mut();
+    // SAFETY: ``bits`` receives a buffer of size * size 32-bit pixels,
+    // which is exactly what's copied into it.
+    unsafe {
+        let bitmap = CreateDIBSection(
+            std::ptr::null_mut(),
+            &info,
+            DIB_RGB_COLORS,
+            &mut bits,
+            std::ptr::null_mut(),
+            0,
+        );
+        if !bitmap.is_null() && !bits.is_null() {
+            std::ptr::copy_nonoverlapping(pixels.as_ptr(), bits.cast::<u32>(), pixels.len());
+        }
+        bitmap
+    }
+}
+
+/// The dot's pixels, row by row from the top, as premultiplied BGRA (the
+/// layout ``AlphaBlend`` expects): a filled circle a little over half the
+/// width, centred, with its edge smoothed by sampling each pixel 4 x 4.
+fn dot_pixels(size: usize) -> Vec<u32> {
+    const SAMPLES: usize = 4;
+    let centre = size as f32 / 2.0;
+    let radius = size as f32 * 0.28;
+    let mut out = Vec::with_capacity(size * size);
+    for y in 0..size {
+        for x in 0..size {
+            let mut inside = 0;
+            for sy in 0..SAMPLES {
+                for sx in 0..SAMPLES {
+                    let px = x as f32 + (sx as f32 + 0.5) / SAMPLES as f32 - centre;
+                    let py = y as f32 + (sy as f32 + 0.5) / SAMPLES as f32 - centre;
+                    if px * px + py * py <= radius * radius {
+                        inside += 1;
+                    }
+                }
+            }
+            let alpha = (inside * 255 / (SAMPLES * SAMPLES)) as u32;
+            let [r, g, b] = DOT_RGB.map(|c| u32::from(c) * alpha / 255);
+            out.push(alpha << 24 | r << 16 | g << 8 | b);
+        }
+    }
+    out
 }
 
 unsafe extern "system" fn window_proc(
@@ -528,7 +642,7 @@ unsafe extern "system" fn window_proc(
 
 #[cfg(test)]
 mod tests {
-    use super::strip_ansi;
+    use super::{DOT_RGB, dot_pixels, strip_ansi};
 
     #[test]
     fn strips_colour_codes() {
@@ -536,5 +650,22 @@ mod tests {
             strip_ansi("\x1b[2m[2026-11-11]\x1b[0m \x1b[32m INFO\x1b[0m Listening"),
             "[2026-11-11]  INFO Listening"
         );
+    }
+
+    #[test]
+    fn draws_a_round_green_dot() {
+        let size = 16;
+        let pixels = dot_pixels(size);
+        assert_eq!(pixels.len(), size * size);
+        // Corners are transparent, the centre is solid green.
+        assert_eq!(pixels[0], 0);
+        assert_eq!(pixels[size * size - 1], 0);
+        let [r, g, b] = DOT_RGB.map(u32::from);
+        assert_eq!(pixels[8 * size + 8], 0xff << 24 | r << 16 | g << 8 | b);
+        // Premultiplied: no channel is brighter than the alpha.
+        for p in pixels {
+            let a = p >> 24;
+            assert!((p >> 16 & 0xff) <= a && (p >> 8 & 0xff) <= a && (p & 0xff) <= a);
+        }
     }
 }
