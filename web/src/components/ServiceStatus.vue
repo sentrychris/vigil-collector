@@ -310,10 +310,27 @@ onBeforeUnmount(() => {
   border-radius: 50%;
   flex-shrink: 0;
 }
+/* The online dot's ring is a second disc behind it that grows and fades.
+   Growing a box-shadow looks the same but is repainted by the page on
+   every frame, for every service, for as long as the dashboard is open;
+   a transform and an opacity are left to the compositor. */
 .dot-online {
-  background: #10b981;
-  box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.55);
+  --ring: rgba(16, 185, 129, 0.55);
+  position: relative;
+}
+.dot-online::before,
+.dot-online::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+}
+.dot-online::before {
+  background: var(--ring);
   animation: pulse-online 2.2s infinite;
+}
+.dot-online::after {
+  background: #10b981;
 }
 .dot-slow {
   background: #f59e0b;
@@ -325,10 +342,11 @@ onBeforeUnmount(() => {
 }
 .dot-pending { background: #9ca3af; }
 
+/* From the dot's own 10px to 10px further out all round. */
 @keyframes pulse-online {
-  0%   { box-shadow: 0 0 0 0   rgba(16, 185, 129, 0.55); }
-  70%  { box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); }
-  100% { box-shadow: 0 0 0 0   rgba(16, 185, 129, 0); }
+  0%   { transform: scale(1); opacity: 1; }
+  70%  { transform: scale(3); opacity: 0; }
+  100% { transform: scale(1); opacity: 0; }
 }
 @keyframes pulse-slow {
   0%, 100% { opacity: 1; transform: scale(1); }
@@ -442,12 +460,6 @@ body[data-theme="dark"] .service-row.is-offline .indicator-bar {
   box-shadow: 0 0 22px rgba(248, 113, 113, 0.5);
 }
 body[data-theme="dark"] .dot-online {
-  box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.55);
-  animation: pulse-online-dark 2.2s infinite;
-}
-@keyframes pulse-online-dark {
-  0%   { box-shadow: 0 0 0 0   rgba(52, 211, 153, 0.55); }
-  70%  { box-shadow: 0 0 0 10px rgba(52, 211, 153, 0); }
-  100% { box-shadow: 0 0 0 0   rgba(52, 211, 153, 0); }
+  --ring: rgba(52, 211, 153, 0.55);
 }
 </style>
