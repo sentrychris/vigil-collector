@@ -87,6 +87,10 @@ jobs:
           # Assets referenced by the dashboard are served from the binary.
           asset=$(grep -o '/assets/index-[^"]*\.js' index.html | head -1)
           curl -sf -o /dev/null "http://localhost:4599$asset"
+          # The settings API belongs to the Vigil window's own listener and
+          # must never be reachable here.
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:4599/control/status)
+          [ "$code" = 404 ] || { echo "/control/status answered $code"; exit 1; }
           kill "$pid" || true
           py=python3; [ "$RUNNER_OS" = Windows ] && py=python
           "$py" - <<'PY'
