@@ -17,7 +17,7 @@ path = "src/main.rs"
 
 [dependencies]
 tokio = { version = "1.54", features = ["rt", "macros", "signal", "time", "sync", "net"] }
-axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "query", "ws"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "query", "ws", "json"] }
 tower-http = { version = "0.7", features = ["cors"] }
 bytes = "1"
 serde = { version = "1", features = ["derive"] }

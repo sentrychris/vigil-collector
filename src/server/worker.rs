@@ -51,7 +51,8 @@ impl WorkerRegistry {
     }
 }
 
-fn generate_id() -> String {
+/// A random URL-safe token: 256 bits from the OS, as text.
+pub fn generate_id() -> String {
     let mut buf = [0u8; TOKEN_BYTES];
     // The OS CSPRNG (getrandom(2) / BCryptGenRandom). It only fails if the
     // OS has no entropy source at all, which no supported platform lacks.

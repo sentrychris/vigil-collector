@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use axum::extract::ws::{CloseFrame, Message, Utf8Bytes, WebSocket, WebSocketUpgrade, close_code};
 use axum::extract::{Query, State};
@@ -58,7 +58,8 @@ pub async fn connect(
     }
     // Check capacity before claiming, so a client turned away for capacity
     // keeps its worker id and can retry within the expiry window.
-    let Some(slot) = Slot::try_reserve(&state.active_ws, state.max_ws_connections) else {
+    let max = state.max_ws.load(Ordering::Acquire);
+    let Some(slot) = Slot::try_reserve(&state.active_ws, max) else {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
             "Server is at full capacity. Please try again later.",
@@ -83,13 +84,14 @@ async fn run_session(mut socket: WebSocket, state: AppState, _slot: Slot) {
 }
 
 async fn push_loop(socket: &mut WebSocket, state: &AppState) -> anyhow::Result<()> {
-    let interval = state.push_interval;
     let mut closing = state.closing.clone();
     loop {
         if *closing.borrow_and_update() {
             return going_away(socket).await;
         }
         let started = Instant::now();
+        // Read each time round: the tick rate can change while connected.
+        let interval = Duration::from_millis(state.push_interval_ms.load(Ordering::Acquire));
         // The cached blob is serde_json output, so it is valid UTF-8; the
         // conversion validates without copying.
         let bytes = Bytes::clone(&state.sampler_json.ws_system.load());

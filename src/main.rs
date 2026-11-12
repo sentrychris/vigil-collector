@@ -7,30 +7,30 @@ mod metrics;
 mod sampler;
 mod server;
 mod snapshot;
+mod supervisor;
 #[cfg(windows)]
 mod tray;
 
-use std::net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs};
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
+use std::time::{Duration, Instant};
 
 use clap::Parser;
 use tokio::sync::{Notify, mpsc};
 
 use crate::cli::Cli;
-use crate::sampler::Sampler;
+use crate::server::control::Control;
+use crate::supervisor::{Command, Supervisor};
 
-fn resolve_addr(host: &str, port: u16) -> anyhow::Result<SocketAddr> {
-    if host.eq_ignore_ascii_case("localhost") {
-        return Ok(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port));
-    }
-    if let Ok(ip) = host.parse::<IpAddr>() {
-        return Ok(SocketAddr::new(ip, port));
-    }
-    let mut iter = (host, port).to_socket_addrs()?;
-    iter.next()
-        .ok_or_else(|| anyhow::anyhow!("could not resolve {host}"))
-}
+/// The most live dashboards the desktop window's own listener serves.
+/// The window uses one; the rest allow for reloads that overlap.
+const WINDOW_MAX_WS: usize = 8;
+/// With both set, any platform serves the control API on
+/// ``127.0.0.1:<port>`` with that token, for working on the Settings page
+/// (see "Development" in the README). Normally only the Windows tray
+/// process serves it, on a port and with a token of its own choosing.
+const CONTROL_PORT_ENV: &str = "VIGIL_CONTROL_PORT";
+const CONTROL_TOKEN_ENV: &str = "VIGIL_CONTROL_TOKEN";
 
 // Single-threaded runtime: the workload is one 1 Hz sampler + a low double-
 // digit number of WebSocket clients on cooperative tasks. A multi-threaded
@@ -50,10 +50,12 @@ async fn main() -> anyhow::Result<()> {
         tray::Mode::Tray => true,
         tray::Mode::Foreground => false,
     };
+    #[cfg(not(windows))]
+    let tray_mode = false;
     // One copy per computer. Checked before the log file is opened, which
     // would otherwise clear the running copy's log.
     #[cfg(windows)]
-    let instance = match tray::Instance::claim() {
+    let _instance = match tray::Instance::claim() {
         Ok(instance) => instance,
         Err(message) => {
             eprintln!("{message}");
@@ -74,13 +76,6 @@ async fn main() -> anyhow::Result<()> {
     // install ring as the process-wide default before any client exists.
     let _ = rustls::crypto::ring::default_provider().install_default();
 
-    let address = args
-        .address
-        .clone()
-        .unwrap_or_else(|| settings.address.clone());
-    let port = args.port.unwrap_or(settings.port_number);
-    let addr = resolve_addr(&address, port)?;
-
     // Double-clicked on Windows with no --port: if the port is taken, use
     // the next free one rather than fail. A port given on the command line
     // is always used as-is.
@@ -88,28 +83,72 @@ async fn main() -> anyhow::Result<()> {
     let search = args.port.is_none() && tray::find_free_port();
     #[cfg(not(windows))]
     let search = false;
-    let listener = server::bind(addr, search).await?;
-    // The tray shows the port actually in use.
-    #[cfg(windows)]
-    let addr = listener.local_addr()?;
 
-    let mut sampler = Sampler::new(settings.ws_push_interval);
-    sampler.start()?;
-
-    // Open WebSocket sessions, shared with the tray menu.
+    // Open WebSocket sessions on the public server, shared with the tray
+    // menu and the Settings page.
     let active_ws = Arc::new(AtomicUsize::new(0));
+    let mut supervisor = Supervisor::new(
+        settings,
+        args.address.clone(),
+        args.port,
+        search,
+        active_ws.clone(),
+    );
 
-    // Menu choices from the Windows tray icon. Elsewhere (and without a
-    // tray) the sender is dropped and nothing ever arrives.
-    #[allow(unused_variables, unused_mut)]
-    let (tray_tx, mut tray_rx) = mpsc::unbounded_channel::<TrayEvent>();
+    // The first start is the one that may fail the whole program: a port
+    // that can't be opened is reported (in the terminal, or a message box
+    // when double-clicked) and Vigil exits, as it always has.
+    let listener = supervisor.bind().await?;
+    supervisor.start_sampler()?;
+
+    // Requests from the tray menu and the Settings page.
+    let (commands, mut requests) = mpsc::unbounded_channel::<Command>();
+
+    // The desktop window's private listener, with the control API.
+    let window = private_listener(tray_mode).await;
+    let window_stop = Arc::new(Notify::new());
+    let mut window_endpoint = None;
+    let window_task = match window {
+        Some((private, token)) => {
+            let port = private.local_addr()?.port();
+            window_endpoint = Some((format!("http://127.0.0.1:{port}"), token.clone()));
+            let serve = server::Serve {
+                sampler_json: supervisor.sampler_json(),
+                push_interval_ms: supervisor.push_interval_ms(),
+                max_ws: Arc::new(AtomicUsize::new(WINDOW_MAX_WS)),
+                active_ws: Arc::new(AtomicUsize::new(0)),
+                control: Some(Control {
+                    token: token.into(),
+                    port,
+                    commands: commands.clone(),
+                    status: supervisor.status(),
+                    active_ws: active_ws.clone(),
+                    max_ws: supervisor.max_ws(),
+                    started: Instant::now(),
+                }),
+            };
+            let stop = window_stop.clone();
+            tracing::debug!("The window's own listener is on 127.0.0.1:{port}");
+            Some(tokio::spawn(server::serve(private, serve, async move {
+                stop.notified().await;
+            })))
+        }
+        None => None,
+    };
+
+    // The tray menu and the Settings page can start the server again, so
+    // with either of them the process stays when the server stops.
+    if tray_mode || window_task.is_some() {
+        supervisor.stay_up();
+    }
+
     #[cfg(windows)]
     let tray = if tray_mode {
-        match tray::Tray::start(
-            format!("http://{}", browsable(addr)),
-            tray_tx,
-            active_ws.clone(),
-        ) {
+        let url = format!("http://{}", server::browsable(listener.local_addr()?));
+        let window = window_endpoint
+            .take()
+            .map(|(origin, token)| tray::WindowEndpoint { origin, token });
+        match tray::Tray::start(url, commands.clone(), active_ws.clone(), window) {
             Ok(tray) => Some(tray),
             Err(e) => {
                 tracing::warn!("No tray icon: {e}");
@@ -120,82 +159,96 @@ async fn main() -> anyhow::Result<()> {
         None
     };
     #[cfg(not(windows))]
-    drop(tray_tx);
+    let _ = (&window_endpoint, tray_mode);
+    // From here only the tray and the control API hold a sender, so with
+    // neither of them the supervisor waits on signals alone.
+    drop(commands);
 
-    // Single shutdown notify shared between signal watcher and server.
-    // ``notify_one`` stores a permit, so a signal that lands before the
-    // server starts awaiting is not lost.
-    let shutdown = Arc::new(Notify::new());
-    let shutdown_for_signal = shutdown.clone();
-    let restart = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let restart_requested = restart.clone();
-    tokio::spawn(async move {
-        let tray_event = async {
-            match tray_rx.recv().await {
-                Some(event) => event,
-                None => std::future::pending().await,
+    supervisor.serve_on(listener)?;
+
+    // Keep the tray's tooltip, menu and window title on the address in
+    // use, which the Settings page can change.
+    #[cfg(windows)]
+    if let Some(tray) = &tray {
+        let handle = tray.handle();
+        let mut status = supervisor.status();
+        tokio::spawn(async move {
+            while status.changed().await.is_ok() {
+                let url = status.borrow_and_update().url.clone();
+                handle.set_url(url);
+            }
+        });
+    }
+
+    let result = supervisor.run(&mut requests, wait_for_signal()).await;
+
+    // Removes the icon and closes the window first, so quitting looks
+    // immediate while connections are closed properly behind it.
+    #[cfg(windows)]
+    drop(tray);
+    supervisor.shutdown().await;
+    if let Some(mut task) = window_task {
+        window_stop.notify_one();
+        if tokio::time::timeout(Duration::from_secs(3), &mut task)
+            .await
+            .is_err()
+        {
+            task.abort();
+        }
+    }
+
+    result
+}
+
+/// Opens the desktop window's private listener: loopback only, on the
+/// port it used last time if that is still free (see
+/// ``config::window_port``), with a token made for this run. ``None``
+/// when this run has no window, or the listener couldn't be opened (the
+/// tray then opens the browser instead).
+async fn private_listener(tray_mode: bool) -> Option<(tokio::net::TcpListener, String)> {
+    use std::net::{Ipv4Addr, SocketAddr};
+    let local = |port| SocketAddr::from((Ipv4Addr::LOCALHOST, port));
+
+    let dev_token = std::env::var(CONTROL_TOKEN_ENV)
+        .ok()
+        .filter(|t| !t.is_empty());
+    let dev_port = std::env::var(CONTROL_PORT_ENV)
+        .ok()
+        .and_then(|p| p.parse::<u16>().ok());
+    if let (Some(token), Some(port)) = (dev_token, dev_port) {
+        return match tokio::net::TcpListener::bind(local(port)).await {
+            Ok(listener) => {
+                tracing::info!("Control API for development on http://127.0.0.1:{port}");
+                Some((listener, token))
+            }
+            Err(e) => {
+                tracing::warn!("No control API: could not listen on 127.0.0.1:{port}: {e}");
+                None
             }
         };
-        tokio::select! {
-            _ = wait_for_signal() => {}
-            event = tray_event => {
-                if event == TrayEvent::Restart {
-                    restart_requested.store(true, std::sync::atomic::Ordering::SeqCst);
-                }
+    }
+    if !tray_mode {
+        return None;
+    }
+
+    let remembered = match config::window_port() {
+        Some(port) => tokio::net::TcpListener::bind(local(port)).await.ok(),
+        None => None,
+    };
+    let listener = match remembered {
+        Some(listener) => listener,
+        None => match tokio::net::TcpListener::bind(local(0)).await {
+            Ok(listener) => listener,
+            Err(e) => {
+                tracing::warn!("No Vigil window: could not open its local listener: {e}");
+                return None;
             }
-        }
-        tracing::info!("Shutting down gracefully...");
-        shutdown_for_signal.notify_one();
-    });
-
-    let server_shutdown = shutdown.clone();
-    let serve_result = server::serve(listener, &sampler, &settings, active_ws, async move {
-        server_shutdown.notified().await;
-    })
-    .await;
-
-    sampler.stop();
-
-    #[cfg(windows)]
-    {
-        // Removes the icon before a restarted copy adds its own.
-        drop(tray);
-        if serve_result.is_ok() && restart.load(std::sync::atomic::Ordering::SeqCst) {
-            tracing::info!("Restarting");
-            // Let the new copy claim the instance.
-            drop(instance);
-            tray::respawn()?;
-        }
+        },
+    };
+    if let Ok(addr) = listener.local_addr() {
+        config::remember_window_port(addr.port());
     }
-    #[cfg(not(windows))]
-    let _ = restart;
-
-    serve_result
-}
-
-/// The address to point a browser at: a wildcard listen address (all
-/// interfaces) becomes loopback, which always reaches it.
-#[cfg_attr(not(windows), allow(dead_code))]
-fn browsable(addr: SocketAddr) -> SocketAddr {
-    match addr.ip() {
-        IpAddr::V4(ip) if ip.is_unspecified() => {
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), addr.port())
-        }
-        IpAddr::V6(ip) if ip.is_unspecified() => {
-            SocketAddr::new(IpAddr::V6(std::net::Ipv6Addr::LOCALHOST), addr.port())
-        }
-        _ => addr,
-    }
-}
-
-/// What the Windows tray menu asks for. Defined for every platform so the
-/// shutdown code reads the same everywhere.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum TrayEvent {
-    #[cfg_attr(not(windows), allow(dead_code))]
-    Restart,
-    #[cfg_attr(not(windows), allow(dead_code))]
-    Quit,
+    Some((listener, server::worker::generate_id()))
 }
 
 #[cfg(unix)]
@@ -250,35 +303,4 @@ async fn wait_for_signal() {
 #[cfg(not(any(unix, windows)))]
 async fn wait_for_signal() {
     let _ = tokio::signal::ctrl_c().await;
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{browsable, resolve_addr};
-    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-
-    #[test]
-    fn resolves_localhost_and_literals() {
-        assert_eq!(
-            resolve_addr("localhost", 1).unwrap().ip(),
-            IpAddr::V4(Ipv4Addr::LOCALHOST)
-        );
-        assert_eq!(
-            resolve_addr("LOCALHOST", 1).unwrap().ip(),
-            IpAddr::V4(Ipv4Addr::LOCALHOST)
-        );
-        assert_eq!(resolve_addr("0.0.0.0", 4500).unwrap().port(), 4500);
-        assert_eq!(
-            resolve_addr("::1", 1).unwrap().ip(),
-            IpAddr::V6(Ipv6Addr::LOCALHOST)
-        );
-    }
-
-    #[test]
-    fn browsable_turns_wildcards_into_loopback() {
-        let url = |addr: &str| format!("http://{}", browsable(addr.parse().unwrap()));
-        assert_eq!(url("0.0.0.0:4500"), "http://127.0.0.1:4500");
-        assert_eq!(url("[::]:4500"), "http://[::1]:4500");
-        assert_eq!(url("192.168.1.5:4500"), "http://192.168.1.5:4500");
-    }
 }
