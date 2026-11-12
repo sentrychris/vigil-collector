@@ -38,7 +38,9 @@ const node = computed(() => {
     <div class="container-fluid py-2 nav-container">
       <RouterLink class="navbar-brand d-flex align-items-center gap-3" to="/">
         <SiteLogo />
+        <!-- The Vigil window's bar is a title bar: the mark alone. -->
         <PageHeader
+          v-if="!frame.framed.value"
           :decor-title="config.app.name"
           :title="config.app.title"
           compact
@@ -324,14 +326,54 @@ const node = computed(() => {
 }
 
 /* ---------- The Vigil window's title bar ---------- */
+/* One slim row, as on any desktop program: the mark on the left, then the
+   dashboard's controls and the window's own buttons on the right. */
 .site-navbar.is-window {
+  --bar-height: 40px;
   /* Above the loading overlay: the window must always be movable and
      closable, whatever the page is doing. */
   z-index: 1060;
+  flex: 0 0 auto;
+  min-height: var(--bar-height);
+  padding: 0;
   user-select: none;
+  box-shadow: none !important;
 }
-/* The controls sit under the window buttons rather than beside them. */
-.is-window .nav-controls { margin-top: 1.1rem; }
+.is-window .nav-container {
+  flex-wrap: nowrap;
+  height: var(--bar-height);
+  /* The right-hand side is the window buttons'. */
+  padding: 0 calc(138px + 0.6rem) 0 0.75rem !important;
+}
+.is-window .navbar-brand {
+  margin: 0;
+  padding: 0;
+}
+.is-window .navbar-brand :deep(.site-logo) {
+  width: 24px;
+  height: 24px;
+  filter: drop-shadow(0 2px 8px rgba(34, 211, 238, 0.35));
+}
+/* Never folds into a menu: the row is short enough at any window size. */
+.is-window .navbar-toggler { display: none; }
+.is-window .navbar-collapse {
+  display: flex !important;
+  flex-basis: auto;
+  min-width: 0;
+  padding-top: 0;
+}
+.is-window .nav-controls {
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  min-width: 0;
+}
+.is-window .control-divider { display: block; height: 16px; }
+.is-window .status-chip,
+.is-window .node-chip {
+  padding: 0.2rem 0.55rem;
+}
+.is-window .node-chip { min-width: 0; }
 
 .window-buttons {
   position: absolute;
@@ -345,7 +387,7 @@ const node = computed(() => {
   align-items: center;
   justify-content: center;
   width: 46px;
-  height: 30px;
+  height: var(--bar-height);
   padding: 0;
   border: 0;
   background: transparent;
@@ -465,9 +507,6 @@ const node = computed(() => {
 
 /* ---------- Mobile ---------- */
 @media (max-width: 991.98px) {
-  /* The menu button moves clear of the window buttons. */
-  .is-window .nav-container { padding-right: 150px; }
-  .is-window .nav-controls { margin-top: 0; }
   .navbar-collapse { padding-top: 0.75rem; }
   .nav-controls {
     justify-content: flex-start;

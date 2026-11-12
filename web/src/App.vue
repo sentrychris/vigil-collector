@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from "vue";
+import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { RouterView, useRoute, useRouter } from "vue-router";
 import SiteNavbar from "./components/SiteNavbar.vue";
 import SiteFooter from "./components/SiteFooter.vue";
@@ -20,6 +20,11 @@ const router = useRouter();
 const { framed } = useWindowFrame();
 if (framed.value) document.documentElement.classList.add("vigil-window");
 const body = ref<HTMLElement | null>(null);
+// A new page starts at its top, as it would in a browser.
+watch(
+  () => route.name,
+  () => body.value?.scrollTo({ top: 0 }),
+);
 
 // In the Vigil window the tray menu's "Settings" asks the page that is
 // already showing to go there, rather than loading it again.

@@ -66,7 +66,50 @@ html.vigil-window .app-body {
   flex: 1 1 0;
   min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   outline: none;
+}
+
+/* ─── Scrollbars ──────────────────────────────────────────────────────────
+   Slim, rounded and in the theme's own tones, with no visible track, for
+   the page and for every scrolling panel inside it. */
+:root {
+  --scroll-thumb: rgba(15, 23, 42, 0.22);
+  --scroll-thumb-hover: rgba(15, 23, 42, 0.4);
+}
+body[data-theme="dark"] {
+  --scroll-thumb: rgba(148, 163, 184, 0.24);
+  --scroll-thumb-hover: rgba(148, 163, 184, 0.45);
+}
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  min-height: 40px;
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-color: var(--scroll-thumb);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover,
+::-webkit-scrollbar-thumb:active {
+  background-color: var(--scroll-thumb-hover);
+}
+::-webkit-scrollbar-button {
+  display: none;
+}
+/* Browsers without the rules above (Firefox) take the standard ones.
+   Chromium must not see these, or it ignores the finer styling. */
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scroll-thumb) transparent;
+  }
 }
 
 p {
