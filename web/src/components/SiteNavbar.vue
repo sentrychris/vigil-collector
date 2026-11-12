@@ -3,11 +3,13 @@ import { computed } from "vue";
 import { config } from "@/config";
 import { useThemeStore } from "@/stores/theme";
 import { useSystemStore } from "@/stores/system";
+import { useControlStore } from "@/stores/control";
 import PageHeader from "@/components/PageHeader.vue";
 import SiteLogo from "@/components/SiteLogo.vue";
 
 const theme = useThemeStore();
 const system = useSystemStore();
+const control = useControlStore();
 const node = computed(() => {
   const region = config.app.deployment.region;
   const instance = config.app.deployment.instance;
@@ -19,14 +21,14 @@ const node = computed(() => {
 <template>
   <nav class="navbar navbar-expand-lg site-navbar shadow-lg">
     <div class="container-fluid py-2 nav-container">
-      <a class="navbar-brand d-flex align-items-center gap-3" href="#">
+      <RouterLink class="navbar-brand d-flex align-items-center gap-3" to="/">
         <SiteLogo />
         <PageHeader
           :decor-title="config.app.name"
           :title="config.app.title"
           compact
         />
-      </a>
+      </RouterLink>
       <button
         class="navbar-toggler"
         type="button"
@@ -44,6 +46,7 @@ const node = computed(() => {
         <div class="nav-controls">
           <!-- Status indicator -->
           <span
+            v-if="$route.name !== 'settings'"
             class="status-chip"
             :class="`status-${system.connectionType}`"
           >
@@ -60,6 +63,19 @@ const node = computed(() => {
           </span>
 
           <span class="control-divider" aria-hidden="true"></span>
+
+          <!-- Settings: only in the Vigil window -->
+          <RouterLink
+            v-if="control.available"
+            class="nav-button"
+            :to="$route.name === 'settings' ? '/' : '/settings'"
+            :title="$route.name === 'settings' ? 'Back to the dashboard' : 'Settings'"
+            :aria-label="$route.name === 'settings' ? 'Back to the dashboard' : 'Settings'"
+          >
+            <font-awesome-icon
+              :icon="$route.name === 'settings' ? 'fa-solid fa-gauge-high' : 'fa-solid fa-gear'"
+            />
+          </RouterLink>
 
           <!-- Theme toggle -->
           <label
@@ -87,6 +103,7 @@ const node = computed(() => {
 
           <!-- Connection mode toggle -->
           <label
+            v-if="$route.name !== 'settings'"
             class="nav-toggle"
             title="Toggle live websocket"
             aria-label="Toggle live websocket"
@@ -218,6 +235,27 @@ const node = computed(() => {
 }
 .node-icon { font-size: var(--fs-caption); color: #60a5fa; flex-shrink: 0; }
 .node-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---------- Settings button ---------- */
+.nav-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 24px;
+  border-radius: 999px;
+  color: #cbd5e1;
+  font-size: var(--fs-caption);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+.nav-button:hover,
+.nav-button:focus-visible {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.18);
+}
 
 /* ---------- Toggle switches ---------- */
 .nav-toggle {
