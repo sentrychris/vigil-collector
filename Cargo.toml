@@ -17,7 +17,7 @@ path = "src/main.rs"
 
 [dependencies]
 tokio = { version = "1.54", features = ["rt", "macros", "signal", "time", "sync", "net"] }
-axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "query", "ws"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "query", "ws", "json"] }
 tower-http = { version = "0.7", features = ["cors"] }
 bytes = "1"
 serde = { version = "1", features = ["derive"] }
@@ -71,6 +71,19 @@ windows-sys = { version = "0.61", features = [
 ] }
 # LibreHardwareMonitor's sensors, read through its WMI namespace.
 wmi = { version = "0.18", default-features = false }
+# The Vigil window: a WebView2 control inside a window the tray thread
+# makes itself (window.rs). WebView2 is part of Windows 11 and comes to
+# Windows 10 through Windows Update, so there is nothing to ship. MinGW
+# builds compile it but leave it out (see the window-on-mingw feature).
+wry = { version = "0.57", default-features = false }
+
+[features]
+# MinGW builds (x86_64-pc-windows-gnu) leave the Vigil window out, because
+# there the WebView2 loader can only be linked as WebView2Loader.dll, which
+# would then have to sit beside the .exe for it to start at all. MSVC
+# builds link the loader in and always have the window. This feature puts
+# the window in a MinGW build too, for those happy to ship the DLL.
+window-on-mingw = []
 
 [profile.release]
 opt-level = 3

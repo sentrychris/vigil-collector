@@ -24,11 +24,14 @@ HTTP and WebSocket handlers read without further work.
 
 ```
 src/
-├── main.rs              entry point; wires runtime, signals, sampler, server
+├── main.rs              entry point; wires runtime, signals, supervisor, listeners, tray
+├── supervisor.rs        owns the sampler and the public listener; start/stop/restart/apply
 ├── cli.rs               clap parser for command-line flags (--address, --port, --foreground)
 ├── config.rs            settings.json load + first-run defaults + migration
 ├── log.rs               tracing setup (stdout + file, classic timestamp, Windows ANSI)
 ├── tray.rs              Windows: launcher hand-off and the notification-area icon + menu
+├── window.rs            Windows: the Vigil window, a WebView2 control on the tray thread
+├── window_none.rs       its stand-in where the window isn't built (MinGW without the feature)
 ├── ico.rs               picks the right-sized image out of the .ico for the tray
 ├── snapshot.rs          shared data model + per-endpoint projections
 ├── sampler.rs           1 Hz tick loop, refresh state, ArcSwap JSON cache
@@ -43,7 +46,8 @@ src/
 │   ├── platform.rs      distro, kernel, uptime string, current user
 │   └── process.rs       top-N by memory and by CPU, PSS-or-RSS detection
 ├── server/              axum HTTP + WS layer
-│   ├── mod.rs           router, AppState, serve()
+│   ├── mod.rs           public and private routers, AppState, serve()
+│   ├── control.rs       /control API behind the Settings page (private listener only)
 │   ├── http.rs          GET /system, /network, /probes; embedded dashboard fallback
 │   ├── ws.rs            WebSocket upgrade and per-client push loop
 │   ├── worker.rs        single-use 5-second token registry for WS handshake
@@ -119,7 +123,10 @@ HEAD/GET checks against the configured probe URLs.
 ```
             Tokio current-thread runtime
             |
-            +-- main task ------------ awaits server, then stops sampler
+            +-- main task ------------ runs the supervisor: handles commands
+            |                          (start, stop, restart, apply, quit)
+            |                          until a signal or Quit, then stops
+            |                          the server and the sampler
             |
             +-- signal task ---------- ctrl_c / SIGTERM (Unix) or console
             |                          control events (Windows); fires the
@@ -127,9 +134,14 @@ HEAD/GET checks against the configured probe URLs.
             |
             +-- sampler task --------- 1 Hz; each tick spawn_blocking(refresh)
             |
-            +-- server task (axum) --- accepts; per-conn task on upgrade
-            |       |
+            +-- server task (axum) --- accepts; per-conn task on upgrade.
+            |       |                  Ended and started again by the
+            |       |                  supervisor; absent while stopped
             |       +-- WS push_loop -- per-client; load + send + recv
+            |
+            +-- private server task -- the window's own listener (Windows
+            |                          tray, or VIGIL_CONTROL_PORT); lives
+            |                          for the whole run
             |
             +-- worker expiry tasks -- one per token, sleeps 5 s, drops entry
             |
@@ -143,12 +155,13 @@ output is redirected), the process that was started is only a launcher:
 it starts a console-less copy with `VIGIL_TRAY_CHILD=1`, relays its
 startup log until the copy prints a private "listening" line, and exits.
 The copy runs the model above plus one OS thread, `tray`, which owns a
-hidden window, the notification-area icon and the Win32 message loop.
-Menu choices reach the signal task over an unbounded channel; Restart
-sets a flag that makes `main` start a fresh copy after the server and
-sampler have stopped and the icon is removed. The menu's connection count
-is the server's `active_ws` counter, which `main` creates and shares with
-both.
+hidden window, the notification-area icon, the Vigil window when it's
+open, and the Win32 message loop. Menu choices reach the supervisor as
+`supervisor::Command`s over an unbounded channel, the same one the
+control API sends on; a task in `main` watches the supervisor's status
+and tells the tray when the address changes or the server stops. The
+menu's connection count is the server's `active_ws` counter, which `main`
+creates and shares with both.
 A double-clicked launcher also sets `VIGIL_FIND_FREE_PORT=1`, which lets
 `server::bind` move past a taken port (without `--port`) instead of
 failing; `main` binds before starting the tray so the tooltip and
@@ -157,7 +170,8 @@ Every Windows copy except the launcher claims the named mutex
 `Global\VigilCollector` before opening the log, so only one runs per
 computer; the launcher only probes it, and when it's taken asks the
 running copy's tray window (found by class, URL in its title) to open the
-dashboard. Restart releases the mutex before starting the new copy.
+Vigil window. Restart no longer starts a new process: the supervisor
+stops the listener, re-reads the settings file and binds again.
 
 Single runtime thread for everything async. Heavy syscalls go to the blocking
 pool so the runtime thread stays unblocked.
@@ -181,11 +195,87 @@ a regression even if tests still pass.
    tick regardless of client count. Old buffers free as readers drop their
    `Bytes` clones. Steady-state heap does not scale with concurrent clients.
 
-4. **CLI flags override settings on startup, not at runtime.** `address` and
-   `port` come from CLI if provided, else from `~/.vigil-collector/settings.json`
-   ([main.rs](../src/main.rs)). The probe list is the
-   exception — re-read on every `/probes` request so operators can edit
-   without restart ([probes.rs](../src/server/probes.rs)).
+4. **CLI flags override the settings file until the user chooses
+   otherwise.** `address` and `port` come from CLI if provided, else from
+   `~/.vigil-collector/settings.json`, and a Restart keeps them. Saving
+   an address or port on the Settings page is the one thing that drops
+   the matching flag for the rest of the run
+   ([Supervisor::apply](../src/supervisor.rs)). The probe list is re-read
+   on every `/probes` request so operators can edit without restart
+   ([probes.rs](../src/server/probes.rs)).
+
+5. **The control API is never on the public listener.** `/control` is
+   mounted only by `server::private_router`; `server::router` answers 404
+   for it explicitly, so a later fallback change can't expose it. The
+   private listener binds `127.0.0.1` only and checks Host, the per-run
+   token and, for cookie sessions, Origin
+   ([control.rs](../src/server/control.rs)).
+
+6. **A change that can't be applied changes nothing.** Moving the
+   listener opens the new port before closing the old one (or goes back
+   to the old address when only the address changed), and the settings
+   file is written only after the running server has taken the change.
+
+## The window and the control API
+
+The dashboard can't tell a browser from the Vigil window by itself; what
+it can do is ask for `/control/status`. Only the private listener answers,
+so only the window gets a Settings link and the lazily loaded Settings
+page.
+
+```
+ tray thread (Win32)                     tokio runtime
+ ┌──────────────────────────┐            ┌─────────────────────────────────┐
+ │ icon + menu ─────────────┼─ Command ─▶│ Supervisor ── public listener   │
+ │ Vigil window (WebView2)  │            │   ▲   │       address:port      │
+ │   └ loads 127.0.0.1:P ───┼── HTTP ───▶│   │   └─ status (watch) ─▶ tray │
+ └──────────────────────────┘            │ private listener 127.0.0.1:P    │
+                                         │   dashboard + /control (token)  │
+                                         └─────────────────────────────────┘
+```
+
+- **Supervisor** ([supervisor.rs](../src/supervisor.rs)). One owner for
+  the sampler, the settings in use and the public listener. `Start`,
+  `Stop`, `Restart`, `Apply` and `Quit` arrive on one channel from the
+  tray menu and the control API, so there is no second path that could
+  disagree about whether the server is up. The connection cap and push
+  interval are atomics that `ws.rs` reads per connection and per frame;
+  the log level goes through `tracing_subscriber::reload`.
+- **Private listener** ([server::private_router](../src/server/mod.rs)).
+  Same routes as the public one plus `/control`, no CORS, its own
+  connection counter and cap so the window can't be locked out by the
+  public limit and isn't counted in it. It keeps running while the public
+  server is stopped, which is what lets "Stop" mean "stop serving others"
+  rather than "stop monitoring". Its port is remembered in
+  `~/.vigil-collector/window.json` so the WebView2 profile (which is
+  keyed by origin) keeps the theme and other saved choices.
+- **Session.** The window is navigated to
+  `/control/session?token=...`, which sets an `HttpOnly`,
+  `SameSite=Strict` cookie and redirects to the dashboard, so the token
+  isn't left in the address or the page's scripts. Tools can send
+  `Authorization: Bearer` instead.
+- **Window** ([window.rs](../src/window.rs)). A plain Win32 window on the
+  tray thread hosting a `wry` WebView2 control, created when opened and
+  destroyed when closed, so an unopened window costs nothing. Links to
+  other sites go to the default browser. If WebView2 isn't installed the
+  tray falls back to the browser.
+
+| Route | Does |
+|---|---|
+| `GET /control/session?token=&next=` | Starts the window's session (303 + cookie) |
+| `GET /control/status` | Version, whether and where it's serving, connections, uptime, file paths |
+| `GET /control/settings` | The settings file as it is now |
+| `PUT /control/settings` | Any subset of keys: validated, applied to the running server, then saved |
+| `POST /control/server/{start,stop,restart}` | Same as the tray menu |
+| `GET /control/logs?after=N` | Log lines newer than `N` from the in-memory buffer (last 2000) |
+| `POST /control/open/{logs,settings,browser}` | Opens the file or the dashboard with the system's default program |
+| `POST /control/quit` | Stops Vigil |
+
+Errors are `{"error": "..."}` with 400 (not valid), 409 (couldn't be
+applied, for example a port in use) or 500 (applied but not saved).
+
+For development, `VIGIL_CONTROL_PORT` and `VIGIL_CONTROL_TOKEN` start the
+private listener on any platform (see the README's Development section).
 
 ## Configuration
 
@@ -196,8 +286,9 @@ returned as notes and logged once the tracing subscriber is up, since
 settings are read before logging can be configured. A UTF-8 byte-order mark
 (Notepad, PowerShell 5) is tolerated.
 
-Logs go to `~/.vigil-collector-logs/app.log` (truncated on startup) plus
-stdout. `~` is the user's home folder on every platform
+Logs go to `~/.vigil-collector-logs/app.log` (truncated on startup and
+again at 4 MiB), stdout, and an in-memory buffer of the last 2000 lines
+for the Settings page. `~` is the user's home folder on every platform
 (`C:\Users\<you>` on Windows). `RUST_LOG` overrides the configured level if set
 ([log.rs](../src/log.rs)).
 

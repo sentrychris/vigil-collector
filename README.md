@@ -14,7 +14,7 @@ in [web/](web/), built into the binary, so there's nothing else to deploy.
 
 - [Quick start](#quick-start)
 - [Building](#building) - [Linux](#linux) · [Windows](#windows) · [macOS](#macos) · [Static and cross-compiled builds](#static-and-cross-compiled-builds)
-- [Running](#running)
+- [Running](#running) - [The system tray on Windows](#the-system-tray-on-windows) · [The Vigil window](#the-vigil-window)
 - [Running in the background](#running-in-the-background)
 - [Configuration](#configuration)
 - [HTTP endpoints](#http-endpoints) · [WebSocket](#websocket) · [Connecting from your own app](#connecting-from-your-own-app)
@@ -175,7 +175,15 @@ cargo build --release --target x86_64-pc-windows-gnu
 The dashboard is plain HTML/JS, so the Linux machine's Node builds it for
 any target. The `x86_64-pc-windows-msvc` target can't be cross-compiled from Linux this
 way (ring needs `clang-cl` for it). Build MSVC binaries on Windows, or use
-the GNU target above; both behave the same at runtime.
+the GNU target above.
+
+The one difference is [the Vigil window](#the-vigil-window). The MSVC
+build links the WebView2 loader into the exe. MinGW can't, and would need
+`WebView2Loader.dll` beside the exe to start at all, so a MinGW build
+leaves the window out and stays one file: its tray menu opens the browser
+and the settings file instead. To have the window in a MinGW build, add
+`--features window-on-mingw` and ship `WebView2Loader.dll` (from the
+WebView2 SDK) next to the exe.
 
 ## Running
 
@@ -209,12 +217,23 @@ crash.
 ### The system tray on Windows
 
 On Windows, Vigil runs in the background with an icon in the
-notification area. Double-click the icon to open the dashboard in your
-browser. Right-click it for a menu with **Open dashboard**, how many
-dashboards are connected and the address, **Restart** and **Quit**, and
-the version. Restart starts it again with the same options and re-reads
-the settings file. The executable has the same icon, and its Properties >
-Details tab shows the version.
+notification area. Double-click the icon to open the dashboard in its own
+window. Right-click it for a menu:
+
+- **Open Vigil** shows the window. **Open in browser** opens the same
+  dashboard in your browser instead.
+- **Settings** opens the window on its [Settings page](#the-vigil-window).
+- How many dashboards are connected, and the address.
+- **Stop serving** closes the server to browsers and other devices while
+  Vigil keeps monitoring and the window keeps working. **Start serving**
+  opens it again. While it's stopped the menu's dot is grey and the
+  icon's tooltip says so.
+- **Restart** stops the server, re-reads the settings file and starts it
+  again, in the same process.
+- **Quit**, and the version.
+
+The executable has the same icon, and its Properties > Details tab shows
+the version.
 
 - **Double-clicked**, it goes straight to the tray, with no console
   window. If its port (4500 unless the settings file says otherwise) is
@@ -232,11 +251,40 @@ Details tab shows the version.
   or a `SYSTEM` task, which have no desktop to show an icon on.
 
 Only one copy runs per computer. Started again while it's running, it
-opens the running copy's dashboard instead (double-clicked), or prints
+opens the running copy's window instead (double-clicked), or prints
 where it's running and exits (from a terminal, or with `--foreground`).
 
-In the tray, the log is written only to the log file (see
-[Configuration](#configuration)).
+In the tray, the log is written to the log file (see
+[Configuration](#configuration)) and shown on the Settings page.
+
+### The Vigil window
+
+The window is the dashboard, drawn by the WebView2 runtime that comes with
+Windows 10 and 11. Closing it leaves Vigil running in the tray; nothing of
+the window stays in memory until it's opened again. On a machine without
+WebView2, the menu opens the dashboard in the browser and the settings
+file in your editor instead.
+
+The gear in the window's top bar opens **Settings**, which only the window
+has (a browser never sees it, on this computer or another):
+
+- **Server**: stop, start and restart it, choose who can connect (this
+  computer only, any device on the network, or one address) and the port.
+  A change moves the running server straight away; if the new port can't
+  be used, Vigil says why and stays where it was.
+- **Connections**: how many live viewers are connected, the limit, and how
+  often readings are taken.
+- **Logs**: what Vigil has logged since it started, live, with the level
+  and the on/off switch.
+- **Service checks**: the addresses the dashboard's Services panel checks.
+- **About**: the version, where the settings and log files are, and
+  **Quit Vigil**.
+
+Everything on the page is saved to the [settings file](#configuration) and
+takes effect without a restart. The window talks to Vigil over its own
+listener on `127.0.0.1`, on a port other than the server's, which needs a
+key made afresh each time Vigil starts. The server other devices reach has
+no settings API at all.
 
 ## Running in the background
 
@@ -357,7 +405,8 @@ Example:
 }
 ```
 
-- `--address` and `--port` override the file at startup.
+- `--address` and `--port` override the file at startup, until a different
+  one is saved on the [Settings page](#the-vigil-window).
 - `RUST_LOG` (e.g. `RUST_LOG=vigil_collector=debug`) overrides `log_level`.
 - `NO_COLOR=1` turns off coloured console output. Colour is also off
   automatically when output isn't a terminal (a file, journald, a pipe).
@@ -365,7 +414,11 @@ Example:
 - On Windows, editing the file in Notepad is fine: the UTF-8 byte-order mark
   it adds is accepted.
 - The probe list is re-read on every `/probes` request, so it can be
-  changed without a restart. Other settings need a restart.
+  changed without a restart. Other edits to the file take effect at the
+  next start, or straight away with **Restart** in the tray menu. Changes
+  made on the [Settings page](#the-vigil-window) are written to the file
+  and apply at once.
+- The log file is started again when it reaches 4 MiB.
 
 ## HTTP endpoints
 
@@ -541,15 +594,31 @@ paths to Vigil on `127.0.0.1:4500`, so run it alongside
 `VIGIL_SKIP_WEB_BUILD=1` to make `cargo build` reuse an existing
 `web/dist` instead of rebuilding it.
 
+The Settings page and the API behind it (`/control/...`, see
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#the-window-and-the-control-api))
+normally exist only for the Vigil window on Windows. To work on them on
+any platform, give the collector a port and a key for that listener, and
+give `npm run dev` the same two:
+
+```sh
+VIGIL_CONTROL_PORT=4501 VIGIL_CONTROL_TOKEN=dev cargo run
+# then either open http://127.0.0.1:4501/control/session?token=dev&next=settings
+# or, for hot reload:
+cd web && VIGIL_CONTROL_PORT=4501 VIGIL_CONTROL_TOKEN=dev npm run dev   # :8888/settings
+```
+
 CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) type-checks and
 unit-tests the dashboard, runs the Rust checks on Linux, Windows and macOS,
 then starts the release binary and checks that `/system`, `/network`,
-`/worker` and the dashboard (page and assets) respond. Platform-specific code lives behind `#[cfg(...)]` in
-`src/metrics/` and `src/log.rs`; if you change it, cross-check the other
-targets:
+`/worker` and the dashboard (page and assets) respond, and that the
+settings API does not. Platform-specific code lives behind `#[cfg(...)]` in
+`src/metrics/`, `src/log.rs`, `src/tray.rs` and `src/window.rs`; if you
+change it, cross-check the other targets:
 
 ```sh
 cargo clippy --all-targets --target x86_64-pc-windows-gnu -- -D warnings
+# the same again with the window compiled in:
+cargo clippy --all-targets --target x86_64-pc-windows-gnu --features window-on-mingw -- -D warnings
 ```
 
 Contributor docs, including the full data flow and runtime model, are in

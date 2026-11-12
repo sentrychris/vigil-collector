@@ -189,6 +189,13 @@ impl CachedJson {
     }
 }
 
+/// The tick period for a ``ws_push_interval`` setting: at least 100 ms,
+/// at most a day, and 100 ms for anything that isn't a number.
+fn tick_interval(secs: f64) -> Duration {
+    let secs = if secs.is_nan() { 0.1 } else { secs };
+    Duration::from_secs_f64(secs.clamp(0.1, 86_400.0))
+}
+
 pub struct Sampler {
     interval: Duration,
     json: Arc<CachedJson>,
@@ -198,7 +205,7 @@ pub struct Sampler {
 
 impl Sampler {
     pub fn new(interval_secs: f64) -> Self {
-        let interval = Duration::from_secs_f64(interval_secs.max(0.1));
+        let interval = tick_interval(interval_secs);
         Self {
             interval,
             json: Arc::new(CachedJson::new()),
@@ -282,6 +289,23 @@ impl Sampler {
         });
 
         self.handle = Some(handle);
+        Ok(())
+    }
+
+    /// Changes the tick rate while running. The published snapshots stay
+    /// where they are (readers hold the same ``CachedJson``); only the
+    /// tick loop is started again.
+    pub fn set_interval(&mut self, interval_secs: f64) -> anyhow::Result<()> {
+        let interval = tick_interval(interval_secs);
+        if interval == self.interval {
+            return Ok(());
+        }
+        let running = self.handle.is_some();
+        self.stop();
+        self.interval = interval;
+        if running {
+            self.start()?;
+        }
         Ok(())
     }
 

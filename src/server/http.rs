@@ -48,6 +48,11 @@ pub async fn dashboard(uri: Uri) -> Response {
         .unwrap_or_else(|| (StatusCode::NOT_FOUND, "dashboard missing").into_response())
 }
 
+/// ``/control`` on the public server: there is no control API here.
+pub async fn no_control() -> Response {
+    (StatusCode::NOT_FOUND, "not found").into_response()
+}
+
 pub async fn preflight() -> StatusCode {
     StatusCode::NO_CONTENT
 }
@@ -91,7 +96,7 @@ pub async fn probes(State(state): State<AppState>) -> Response {
     json_response(&result)
 }
 
-fn json_response<T: Serialize>(value: &T) -> Response {
+pub fn json_response<T: Serialize>(value: &T) -> Response {
     match serde_json::to_vec(value) {
         Ok(bytes) => raw_json(Bytes::from(bytes)),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
