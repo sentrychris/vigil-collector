@@ -256,7 +256,14 @@ page.
   `Authorization: Bearer` instead.
 - **Window** ([window.rs](../src/window.rs)). A plain Win32 window on the
   tray thread hosting a `wry` WebView2 control, created when opened and
-  destroyed when closed, so an unopened window costs nothing. Links to
+  destroyed when closed, so an unopened window costs nothing. It has no
+  title bar: `WM_NCCALCSIZE` gives that strip to the page, and
+  `SiteNavbar.vue` draws the buttons and reports presses on the bar with
+  `window.ipc.postMessage` (`drag`, `maximize`, `close`, `resize:top`
+  and so on), which the window turns into the same non-client messages a
+  real title bar would produce. The side and bottom resize borders, the
+  shadow and snapping stay Windows' own. The page learns whether it is
+  maximised from a `vigil:window` event. Links to
   other sites go to the default browser. If WebView2 isn't installed the
   tray falls back to the browser.
 

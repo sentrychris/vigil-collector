@@ -4,12 +4,23 @@ import { config } from "@/config";
 import { useThemeStore } from "@/stores/theme";
 import { useSystemStore } from "@/stores/system";
 import { useControlStore } from "@/stores/control";
+import { useWindowFrame } from "@/composables/useWindowFrame";
 import PageHeader from "@/components/PageHeader.vue";
 import SiteLogo from "@/components/SiteLogo.vue";
 
 const theme = useThemeStore();
 const system = useSystemStore();
 const control = useControlStore();
+const frame = useWindowFrame();
+
+// In the Vigil window this bar is the title bar: pressing an empty part of
+// it moves the window, and a double press maximises it or puts it back.
+function barPressed(event: MouseEvent) {
+  if (!frame.framed.value || event.button !== 0) return;
+  const target = event.target as Element | null;
+  if (target?.closest("a, button, input, label, .window-buttons, .resize-edge")) return;
+  frame.ask(event.detail === 2 ? "maximize" : "drag");
+}
 const node = computed(() => {
   const region = config.app.deployment.region;
   const instance = config.app.deployment.instance;
@@ -19,11 +30,17 @@ const node = computed(() => {
 </script>
 
 <template>
-  <nav class="navbar navbar-expand-lg site-navbar shadow-lg">
+  <nav
+    class="navbar navbar-expand-lg site-navbar shadow-lg"
+    :class="{ 'is-window': frame.framed.value }"
+    @mousedown="barPressed"
+  >
     <div class="container-fluid py-2 nav-container">
       <RouterLink class="navbar-brand d-flex align-items-center gap-3" to="/">
         <SiteLogo />
+        <!-- The Vigil window's bar is a title bar: the mark alone. -->
         <PageHeader
+          v-if="!frame.framed.value"
           :decor-title="config.app.name"
           :title="config.app.title"
           compact
@@ -128,6 +145,57 @@ const node = computed(() => {
         </div>
       </div>
     </div>
+
+    <!-- The Vigil window's own buttons; it has no title bar but this one. -->
+    <template v-if="frame.framed.value">
+      <div class="window-buttons">
+        <button
+          type="button"
+          class="window-button"
+          title="Minimise"
+          aria-label="Minimise"
+          @click="frame.ask('minimize')"
+        >
+          <svg viewBox="0 0 10 10" aria-hidden="true"><path d="M0 5.5h10" /></svg>
+        </button>
+        <button
+          type="button"
+          class="window-button"
+          :title="frame.maximized.value ? 'Restore' : 'Maximise'"
+          :aria-label="frame.maximized.value ? 'Restore' : 'Maximise'"
+          @click="frame.ask('maximize')"
+        >
+          <svg v-if="frame.maximized.value" viewBox="0 0 10 10" aria-hidden="true">
+            <path d="M2.5 2.5v-2h7v7h-2M0.5 2.5h7v7h-7z" />
+          </svg>
+          <svg v-else viewBox="0 0 10 10" aria-hidden="true">
+            <path d="M0.5 0.5h9v9h-9z" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          class="window-button window-close"
+          title="Close"
+          aria-label="Close"
+          @click="frame.ask('close')"
+        >
+          <svg viewBox="0 0 10 10" aria-hidden="true"><path d="M0.5 0.5l9 9M9.5 0.5l-9 9" /></svg>
+        </button>
+      </div>
+      <!-- The sides and bottom of the window have Windows' own resize
+           borders. The top edge is this bar, so it does the same job. -->
+      <template v-if="!frame.maximized.value">
+        <div class="resize-edge resize-top" @mousedown.left.prevent="frame.ask('resize:top')"></div>
+        <div
+          class="resize-edge resize-top-left"
+          @mousedown.left.prevent="frame.ask('resize:top-left')"
+        ></div>
+        <div
+          class="resize-edge resize-top-right"
+          @mousedown.left.prevent="frame.ask('resize:top-right')"
+        ></div>
+      </template>
+    </template>
   </nav>
 </template>
 
@@ -255,6 +323,124 @@ const node = computed(() => {
   color: #ffffff;
   background: rgba(255, 255, 255, 0.1);
   border-color: rgba(255, 255, 255, 0.18);
+}
+
+/* ---------- The Vigil window's title bar ---------- */
+/* One slim row, as on any desktop program: the mark on the left, then the
+   dashboard's controls and the window's own buttons on the right. */
+.site-navbar.is-window {
+  --bar-height: 40px;
+  /* Above the loading overlay: the window must always be movable and
+     closable, whatever the page is doing. */
+  z-index: 1060;
+  flex: 0 0 auto;
+  min-height: var(--bar-height);
+  padding: 0;
+  user-select: none;
+  box-shadow: none !important;
+}
+.is-window .nav-container {
+  flex-wrap: nowrap;
+  height: var(--bar-height);
+  /* The right-hand side is the window buttons'. */
+  padding: 0 calc(138px + 0.6rem) 0 0.75rem !important;
+}
+.is-window .navbar-brand {
+  margin: 0;
+  padding: 0;
+}
+.is-window .navbar-brand :deep(.site-logo) {
+  width: 24px;
+  height: 24px;
+  filter: drop-shadow(0 2px 8px rgba(34, 211, 238, 0.35));
+}
+/* Never folds into a menu: the row is short enough at any window size. */
+.is-window .navbar-toggler { display: none; }
+.is-window .navbar-collapse {
+  display: flex !important;
+  flex-basis: auto;
+  min-width: 0;
+  padding-top: 0;
+}
+.is-window .nav-controls {
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  min-width: 0;
+}
+.is-window .control-divider { display: block; height: 16px; }
+.is-window .status-chip,
+.is-window .node-chip {
+  padding: 0.2rem 0.55rem;
+}
+.is-window .node-chip { min-width: 0; }
+
+.window-buttons {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 2;
+  display: flex;
+}
+.window-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: var(--bar-height);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #cbd5e1;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.window-button svg {
+  width: 10px;
+  height: 10px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+.window-close svg { shape-rendering: geometricPrecision; }
+.window-button:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+.window-button:active { background: rgba(255, 255, 255, 0.16); }
+.window-button:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: -2px;
+}
+.window-close:hover {
+  background: #c42b1c;
+  color: #ffffff;
+}
+.window-close:active { background: #b3271a; }
+
+.resize-edge {
+  position: absolute;
+  top: 0;
+  z-index: 3;
+}
+.resize-top {
+  left: 0;
+  right: 0;
+  height: 4px;
+  cursor: ns-resize;
+}
+.resize-top-left,
+.resize-top-right {
+  width: 10px;
+  height: 10px;
+}
+.resize-top-left {
+  left: 0;
+  cursor: nwse-resize;
+}
+.resize-top-right {
+  right: 0;
+  cursor: nesw-resize;
 }
 
 /* ---------- Toggle switches ---------- */
