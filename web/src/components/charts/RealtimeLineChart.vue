@@ -2,6 +2,7 @@
 import * as d3 from "d3";
 import { ref, computed, onMounted, onUnmounted, watch } from "vue";
 import { useResizeObserver } from "@/utilities/resize-observer";
+import { frameLoop, type FrameLoop } from "@/utilities/frame-loop";
 import type { RealtimeDataPoint } from "@/interfaces/ChartRegistry";
 
 type Tone = "blue" | "purple" | "amber" | "green" | "cyan" | "rose";
@@ -47,16 +48,14 @@ const SAMPLE_MS = 500;
 const WINDOW_MS = 30_000;
 
 let sampleTimerId: number | null = null;
-let rafId = 0;
-let stopped = true;
+let loop: FrameLoop | null = null;
 let data: RealtimeDataPoint[] = [];
 
 const teardown = () => {
-  stopped = true;
+  loop?.stop();
+  loop = null;
   if (sampleTimerId !== null) clearInterval(sampleTimerId);
   sampleTimerId = null;
-  if (rafId) cancelAnimationFrame(rafId);
-  rafId = 0;
 };
 
 const draw = () => {
@@ -253,7 +252,6 @@ const draw = () => {
   };
 
   const render = () => {
-    if (stopped) return;
     const now = Date.now();
     timeScale.domain([now - WINDOW_MS, now]);
 
@@ -276,13 +274,11 @@ const draw = () => {
     }
 
     renderXAxis(now);
-    rafId = requestAnimationFrame(render);
   };
 
-  stopped = false;
   sample();
   sampleTimerId = window.setInterval(sample, SAMPLE_MS);
-  rafId = requestAnimationFrame(render);
+  loop = frameLoop(svgRef.value!, render);
 };
 
 onMounted(() => {

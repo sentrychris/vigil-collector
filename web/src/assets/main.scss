@@ -197,8 +197,10 @@ h2.header {
   overflow: hidden;
   background: rgba(255, 255, 255, 0.72) !important;
   border: 1px solid rgba(255, 255, 255, 0.85) !important;
-  backdrop-filter: blur(18px) saturate(140%);
-  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  /* No backdrop-filter here. The only thing behind a panel is the page's
+     soft gradient, which looks the same blurred as not, and a blurred
+     backdrop is worked out again for the whole panel whenever anything
+     inside it moves: every frame of every chart. */
   box-shadow:
     0 1px 0 rgba(255, 255, 255, 0.9) inset,
     0 8px 24px -8px rgba(15, 23, 42, 0.18),

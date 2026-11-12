@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { tween } from "@/utilities/frame-loop";
 
 const props = defineProps<{
   id: string;
@@ -20,27 +21,19 @@ const ARC_LENGTH = CIRCUMFERENCE * (ARC_DEGREES / 360);
 const clamp = (v: number) => Math.max(0, Math.min(100, v));
 
 const animatedValue = ref(0);
-let rafId: number | null = null;
+let stopTween: (() => void) | null = null;
 
 const animateTo = (target: number) => {
-  if (rafId !== null) cancelAnimationFrame(rafId);
+  stopTween?.();
   const start = animatedValue.value;
-  const startTime = performance.now();
-  const duration = 700;
-  const tick = (now: number) => {
-    const t = Math.min(1, (now - startTime) / duration);
+  stopTween = tween(700, (t) => {
     const eased = 1 - Math.pow(1 - t, 3);
     animatedValue.value = start + (target - start) * eased;
-    if (t < 1) rafId = requestAnimationFrame(tick);
-    else rafId = null;
-  };
-  rafId = requestAnimationFrame(tick);
+  });
 };
 
 onMounted(() => animateTo(clamp(props.metric)));
-onUnmounted(() => {
-  if (rafId !== null) cancelAnimationFrame(rafId);
-});
+onUnmounted(() => stopTween?.());
 
 watch(
   () => props.metric,

@@ -38,11 +38,12 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     CW_USEDEFAULT, CreateWindowExW, DefWindowProcW, DestroyIcon, DestroyWindow, GetCursorPos,
     GetSystemMetrics, HICON, HTCAPTION, HTTOP, HTTOPLEFT, HTTOPRIGHT, ICON_BIG, ICON_SMALL,
     IDC_ARROW, IsIconic, IsZoomed, LoadCursorW, MINMAXINFO, PostMessageW, RegisterClassW,
-    SIZE_MAXIMIZED, SIZE_RESTORED, SM_CXICON, SM_CXPADDEDBORDER, SM_CXSMICON, SM_CYSIZEFRAME,
-    SPI_GETWORKAREA, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW, SWP_FRAMECHANGED,
-    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER, SendMessageW, SetForegroundWindow, SetWindowPos,
-    ShowWindow, SystemParametersInfoW, WM_APP, WM_CLOSE, WM_DPICHANGED, WM_GETMINMAXINFO,
-    WM_NCCALCSIZE, WM_NCLBUTTONDOWN, WM_SETICON, WM_SIZE, WNDCLASSW, WS_OVERLAPPEDWINDOW,
+    SIZE_MAXIMIZED, SIZE_MINIMIZED, SIZE_RESTORED, SM_CXICON, SM_CXPADDEDBORDER, SM_CXSMICON,
+    SM_CYSIZEFRAME, SPI_GETWORKAREA, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW,
+    SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER, SendMessageW, SetForegroundWindow,
+    SetWindowPos, ShowWindow, SystemParametersInfoW, WM_APP, WM_CLOSE, WM_DPICHANGED,
+    WM_GETMINMAXINFO, WM_NCCALCSIZE, WM_NCLBUTTONDOWN, WM_SETICON, WM_SIZE, WNDCLASSW,
+    WS_OVERLAPPEDWINDOW,
 };
 use wry::raw_window_handle::{
     HandleError, HasWindowHandle, RawWindowHandle, Win32WindowHandle, WindowHandle,
@@ -134,6 +135,8 @@ struct Window {
     hwnd: HWND,
     webview: WebView,
     icons: [HICON; 2],
+    /// False while the window is minimised and the control is hidden.
+    page_shown: Cell<bool>,
 }
 
 thread_local! {
@@ -254,6 +257,7 @@ fn create(origin: &str, token: &str, page: Page) -> Result<(), String> {
                 hwnd,
                 webview,
                 icons,
+                page_shown: Cell::new(true),
             }));
             bring_forward(hwnd);
             Ok(())
@@ -387,6 +391,20 @@ fn tell_page(hwnd: HWND) {
             && let Some(window) = window.as_ref()
         {
             let _ = window.webview.evaluate_script(&script);
+        }
+    });
+}
+
+/// Shows or hides the WebView2 control. A minimised window's page still
+/// counts as visible and goes on drawing its charts, sixty times a second,
+/// for nobody; hiding the control is what tells the page to stop.
+fn show_page(shown: bool) {
+    WINDOW.with(|window| {
+        if let Ok(window) = window.try_borrow()
+            && let Some(window) = window.as_ref()
+            && window.page_shown.replace(shown) != shown
+        {
+            let _ = window.webview.set_visible(shown);
         }
     });
 }
@@ -538,7 +556,10 @@ unsafe extern "system" fn window_proc(
                 0
             }
             WM_SIZE => {
-                if wparam == SIZE_MAXIMIZED as WPARAM || wparam == SIZE_RESTORED as WPARAM {
+                if wparam == SIZE_MINIMIZED as WPARAM {
+                    show_page(false);
+                } else if wparam == SIZE_MAXIMIZED as WPARAM || wparam == SIZE_RESTORED as WPARAM {
+                    show_page(true);
                     tell_page(hwnd);
                 }
                 DefWindowProcW(hwnd, msg, wparam, lparam)

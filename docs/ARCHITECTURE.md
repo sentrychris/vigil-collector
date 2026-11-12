@@ -265,7 +265,19 @@ page.
   shadow and snapping stay Windows' own. The page learns whether it is
   maximised from a `vigil:window` event. Links to
   other sites go to the default browser. If WebView2 isn't installed the
-  tray falls back to the browser.
+  tray falls back to the browser. While the window is minimised the
+  control is hidden (`show_page`), because WebView2 doesn't otherwise
+  tell the page it can't be seen and the charts would go on drawing.
+- **Drawing** ([frame-loop.ts](../web/src/utilities/frame-loop.ts)). A
+  monitor shouldn't be the busiest thing it monitors, and a page that
+  redraws on every display frame is: it measured about one whole core.
+  Everything that moves on a chart draws on one shared clock, thirty
+  times a second and all in the same frame, and not at all while the
+  page is hidden or the chart is scrolled away. Use `frameLoop` or
+  `tween` rather than `requestAnimationFrame` in a chart, keep
+  always-running CSS animations to `transform` and `opacity`, and don't
+  put `backdrop-filter` on anything a chart sits inside (it is worked
+  out again for the whole element on every frame drawn within it).
 
 | Route | Does |
 |---|---|

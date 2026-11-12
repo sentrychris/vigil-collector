@@ -264,7 +264,8 @@ Windows 10 and 11. It has no separate title bar: the dashboard's top bar
 is the title bar, with the minimise, maximise and close buttons in its
 corner. Drag the bar to move the window, double-click it to maximise.
 Closing it leaves Vigil running in the tray; nothing of
-the window stays in memory until it's opened again. On a machine without
+the window stays in memory until it's opened again. Minimised, it stops
+drawing. On a machine without
 WebView2, the menu opens the dashboard in the browser and the settings
 file in your editor instead.
 

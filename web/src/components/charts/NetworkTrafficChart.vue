@@ -2,6 +2,7 @@
 import * as d3 from "d3";
 import { ref, computed, onMounted, onUnmounted, watch } from "vue";
 import { useResizeObserver } from "@/utilities/resize-observer";
+import { easeToward, frameLoop, type FrameLoop } from "@/utilities/frame-loop";
 import type { RealtimeDataPoint } from "@/interfaces/ChartRegistry";
 
 const props = defineProps<{
@@ -44,17 +45,15 @@ const SAMPLE_MS = 500;
 const WINDOW_MS = 30_000;
 
 let sampleTimerId: number | null = null;
-let rafId = 0;
-let stopped = true;
+let loop: FrameLoop | null = null;
 let rxData: RealtimeDataPoint[] = [];
 let txData: RealtimeDataPoint[] = [];
 
 const teardown = () => {
-  stopped = true;
+  loop?.stop();
+  loop = null;
   if (sampleTimerId !== null) clearInterval(sampleTimerId);
   sampleTimerId = null;
-  if (rafId) cancelAnimationFrame(rafId);
-  rafId = 0;
 };
 
 const draw = () => {
@@ -230,9 +229,9 @@ const draw = () => {
   };
 
   let lastDomainMax = MIN_Y;
+  let renderedAt = 0;
 
   const render = () => {
-    if (stopped) return;
     const now = Date.now();
     timeScale.domain([now - WINDOW_MS, now]);
 
@@ -250,7 +249,8 @@ const draw = () => {
     for (const d of txd) if (d.time >= visibleStart && d.value > observedMax) observedMax = d.value;
     const targetMax = observedMax * 1.2;
     // Smooth transitions so the axis doesn't jitter on every sample.
-    const newMax = lastDomainMax * 0.85 + targetMax * 0.15;
+    const newMax = easeToward(lastDomainMax, targetMax, now - renderedAt);
+    renderedAt = now;
     if (Math.abs(newMax - lastDomainMax) / lastDomainMax > 0.005) {
       lastDomainMax = newMax;
       valueScale.domain([0, lastDomainMax]);
@@ -267,13 +267,11 @@ const draw = () => {
     }
 
     renderXAxis(now);
-    rafId = requestAnimationFrame(render);
   };
 
-  stopped = false;
   sample();
   sampleTimerId = window.setInterval(sample, SAMPLE_MS);
-  rafId = requestAnimationFrame(render);
+  loop = frameLoop(svgRef.value!, render);
 };
 
 onMounted(() => {

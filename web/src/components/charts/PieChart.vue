@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { formatSize } from "@/utilities/format-size";
 import { computed, ref, watch, onMounted, onUnmounted } from "vue";
+import { tween } from "@/utilities/frame-loop";
 
 type Slice = { name: string; color: string; y: number };
 
@@ -56,26 +57,18 @@ const arcs = computed<Arc[]>(() => {
 });
 
 const progress = ref(0);
-let rafId: number | null = null;
+let stopTween: (() => void) | null = null;
 
 const runIntro = () => {
-  if (rafId !== null) cancelAnimationFrame(rafId);
+  stopTween?.();
   progress.value = 0;
-  const start = performance.now();
-  const duration = 900;
-  const tick = (now: number) => {
-    const t = Math.min(1, (now - start) / duration);
+  stopTween = tween(900, (t) => {
     progress.value = 1 - Math.pow(1 - t, 3);
-    if (t < 1) rafId = requestAnimationFrame(tick);
-    else rafId = null;
-  };
-  rafId = requestAnimationFrame(tick);
+  });
 };
 
 onMounted(() => runIntro());
-onUnmounted(() => {
-  if (rafId !== null) cancelAnimationFrame(rafId);
-});
+onUnmounted(() => stopTween?.());
 
 watch(
   () => (props.series ?? []).map((s) => s.name).join("|"),
