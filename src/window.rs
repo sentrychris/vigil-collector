@@ -1,9 +1,17 @@
 //! The Vigil window: the dashboard as a desktop program.
 //!
-//! One ordinary window with a WebView2 control filling it, showing the
-//! same dashboard a browser would. It loads from the tray process's
-//! private listener (see ``server::control``), which is also the only
-//! place the Settings page is served.
+//! One window with a WebView2 control filling it, showing the same
+//! dashboard a browser would. It loads from the tray process's private
+//! listener (see ``server::control``), which is also the only place the
+//! Settings page is served.
+//!
+//! The window has no title bar of its own. The dashboard's top bar takes
+//! its place: it draws the minimise, maximise and close buttons and is
+//! what the window is dragged by (``SiteNavbar.vue``), and asks for each
+//! of those through ``window.ipc.postMessage``. Everything else about the
+//! window is still Windows' own: the resize borders at the sides and
+//! bottom, the shadow and rounded corners, snapping and the keyboard
+//! shortcuts.
 //!
 //! The window lives on the tray thread. That thread already has what
 //! WebView2 asks for: a message loop, single-threaded COM, and per-monitor
@@ -24,14 +32,17 @@ use std::num::NonZeroIsize;
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::{BLACK_BRUSH, GetStockObject};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
+use windows_sys::Win32::UI::HiDpi::{GetDpiForWindow, GetSystemMetricsForDpi};
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CW_USEDEFAULT, CreateWindowExW, DefWindowProcW, DestroyIcon, DestroyWindow, GetSystemMetrics,
-    HICON, ICON_BIG, ICON_SMALL, IDC_ARROW, IsIconic, LoadCursorW, MINMAXINFO, RegisterClassW,
-    SM_CXICON, SM_CXSMICON, SPI_GETWORKAREA, SW_RESTORE, SW_SHOW, SWP_NOACTIVATE, SWP_NOMOVE,
-    SWP_NOZORDER, SendMessageW, SetForegroundWindow, SetWindowPos, ShowWindow,
-    SystemParametersInfoW, WM_CLOSE, WM_DPICHANGED, WM_GETMINMAXINFO, WM_SETICON, WNDCLASSW,
-    WS_OVERLAPPEDWINDOW,
+    CW_USEDEFAULT, CreateWindowExW, DefWindowProcW, DestroyIcon, DestroyWindow, GetCursorPos,
+    GetSystemMetrics, HICON, HTCAPTION, HTTOP, HTTOPLEFT, HTTOPRIGHT, ICON_BIG, ICON_SMALL,
+    IDC_ARROW, IsIconic, IsZoomed, LoadCursorW, MINMAXINFO, PostMessageW, RegisterClassW,
+    SIZE_MAXIMIZED, SIZE_RESTORED, SM_CXICON, SM_CXPADDEDBORDER, SM_CXSMICON, SM_CYSIZEFRAME,
+    SPI_GETWORKAREA, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW, SWP_FRAMECHANGED,
+    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER, SendMessageW, SetForegroundWindow, SetWindowPos,
+    ShowWindow, SystemParametersInfoW, WM_APP, WM_CLOSE, WM_DPICHANGED, WM_GETMINMAXINFO,
+    WM_NCCALCSIZE, WM_NCLBUTTONDOWN, WM_SETICON, WM_SIZE, WNDCLASSW, WS_OVERLAPPEDWINDOW,
 };
 use wry::raw_window_handle::{
     HandleError, HasWindowHandle, RawWindowHandle, Win32WindowHandle, WindowHandle,
@@ -51,6 +62,66 @@ const BACKGROUND: (u8, u8, u8, u8) = (0x0a, 0x0e, 0x17, 0xff);
 /// again (``App.vue`` listens for this).
 const GO_TO_SETTINGS: &str =
     "window.dispatchEvent(new CustomEvent('vigil:navigate', { detail: '/settings' }))";
+
+/// Posted to the window by the page's title bar, with an ``Ask`` in
+/// ``wparam``. Posted rather than acted on at once because the request
+/// arrives inside a WebView2 callback, which is no place to move, resize
+/// or close the window that control lives in.
+const WM_PAGE_ASKED: u32 = WM_APP + 1;
+
+/// What the page's title bar can ask of the window.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(usize)]
+enum Ask {
+    /// Is the window maximised? Answered with a ``vigil:window`` event.
+    State = 1,
+    Minimize,
+    /// Maximise, or put back if it already is.
+    Maximize,
+    Close,
+    /// The bar was pressed: move the window with the mouse.
+    Drag,
+    /// The top edge or a top corner was pressed: resize from there. The
+    /// other edges are outside the page and Windows' own.
+    ResizeTop,
+    ResizeTopLeft,
+    ResizeTopRight,
+}
+
+impl Ask {
+    const ALL: [Ask; 8] = [
+        Ask::State,
+        Ask::Minimize,
+        Ask::Maximize,
+        Ask::Close,
+        Ask::Drag,
+        Ask::ResizeTop,
+        Ask::ResizeTopLeft,
+        Ask::ResizeTopRight,
+    ];
+
+    /// The word the page sends for it.
+    fn word(self) -> &'static str {
+        match self {
+            Ask::State => "state",
+            Ask::Minimize => "minimize",
+            Ask::Maximize => "maximize",
+            Ask::Close => "close",
+            Ask::Drag => "drag",
+            Ask::ResizeTop => "resize:top",
+            Ask::ResizeTopLeft => "resize:top-left",
+            Ask::ResizeTopRight => "resize:top-right",
+        }
+    }
+
+    fn from_word(word: &str) -> Option<Ask> {
+        Ask::ALL.into_iter().find(|ask| ask.word() == word)
+    }
+
+    fn from_wparam(wparam: WPARAM) -> Option<Ask> {
+        Ask::ALL.into_iter().find(|ask| *ask as usize == wparam)
+    }
+}
 
 /// Which page the window should be showing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -220,7 +291,7 @@ unsafe fn place(hwnd: HWND) {
                 0,
                 width,
                 height,
-                SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOMOVE,
+                SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOMOVE | SWP_FRAMECHANGED,
             );
             return;
         }
@@ -235,9 +306,89 @@ unsafe fn place(hwnd: HWND) {
             y,
             width,
             height,
-            SWP_NOZORDER | SWP_NOACTIVATE,
+            // Has the frame worked out again, now without its title bar.
+            SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
         );
     }
+}
+
+/// Does what the page's title bar asked for.
+///
+/// # Safety
+/// ``hwnd`` must be this thread's live Vigil window.
+unsafe fn page_asked(hwnd: HWND, ask: Ask) {
+    // SAFETY (caller): plain calls on this thread's own window.
+    unsafe {
+        match ask {
+            Ask::State => tell_page(hwnd),
+            Ask::Minimize => {
+                ShowWindow(hwnd, SW_MINIMIZE);
+            }
+            Ask::Maximize => {
+                let show = if IsZoomed(hwnd) != 0 {
+                    SW_RESTORE
+                } else {
+                    SW_MAXIMIZE
+                };
+                ShowWindow(hwnd, show);
+            }
+            Ask::Close => {
+                PostMessageW(hwnd, WM_CLOSE, 0, 0);
+            }
+            Ask::Drag => begin_move_or_size(hwnd, HTCAPTION),
+            Ask::ResizeTop => begin_move_or_size(hwnd, HTTOP),
+            Ask::ResizeTopLeft => begin_move_or_size(hwnd, HTTOPLEFT),
+            Ask::ResizeTopRight => begin_move_or_size(hwnd, HTTOPRIGHT),
+        }
+    }
+}
+
+/// Hands a mouse press that happened in the page to Windows as if it had
+/// been on the title bar (``HTCAPTION``) or an edge, so moving, resizing,
+/// snapping and dragging a maximised window free all behave as they do
+/// for any other window.
+///
+/// # Safety
+/// ``hwnd`` must be this thread's live Vigil window.
+unsafe fn begin_move_or_size(hwnd: HWND, hit: u32) {
+    // SAFETY (caller): ``hwnd`` is live; ``at`` is a valid out-pointer.
+    unsafe {
+        let mut at = POINT::default();
+        GetCursorPos(&mut at);
+        // The page has the mouse while the button is down; Windows won't
+        // start its own move until it is let go of.
+        ReleaseCapture();
+        PostMessageW(hwnd, WM_NCLBUTTONDOWN, hit as WPARAM, point_lparam(at));
+    }
+}
+
+/// A screen position packed the way mouse messages carry it: x in the low
+/// 16 bits and y in the next 16, each signed (displays left of or above
+/// the primary one have negative coordinates).
+fn point_lparam(at: POINT) -> LPARAM {
+    let x = at.x as i16 as u16 as u32;
+    let y = at.y as i16 as u16 as u32;
+    ((y << 16) | x) as LPARAM
+}
+
+/// Tells the page whether the window is maximised, so its button can show
+/// the right picture and its resize edge can step aside.
+fn tell_page(hwnd: HWND) {
+    // SAFETY: a plain query of this thread's own window.
+    let maximized = unsafe { IsZoomed(hwnd) != 0 };
+    let script = format!(
+        "window.dispatchEvent(new CustomEvent('vigil:window', \
+         {{ detail: {{ maximized: {maximized} }} }}))"
+    );
+    // Not there while the control is being made or taken apart; the page
+    // asks again when it loads.
+    WINDOW.with(|window| {
+        if let Ok(window) = window.try_borrow()
+            && let Some(window) = window.as_ref()
+        {
+            let _ = window.webview.evaluate_script(&script);
+        }
+    });
 }
 
 /// Makes the WebView2 control inside ``hwnd`` and points it at the
@@ -263,6 +414,18 @@ fn webview(hwnd: HWND, origin: &str, token: &str, page: Page) -> Result<WebView,
         .with_url(url)
         .with_background_color(BACKGROUND)
         .with_devtools(cfg!(debug_assertions))
+        // The page's title bar. Only our own pages get this far: the
+        // navigation handler below keeps every other site out.
+        .with_ipc_handler({
+            let hwnd = hwnd as usize;
+            move |request| {
+                if let Some(ask) = Ask::from_word(request.body()) {
+                    // SAFETY: posting to this thread's own window; a
+                    // window that has gone just drops the message.
+                    unsafe { PostMessageW(hwnd as HWND, WM_PAGE_ASKED, ask as WPARAM, 0) };
+                }
+            }
+        })
         .with_navigation_handler({
             let stays = stays.clone();
             move |url| {
@@ -341,6 +504,45 @@ unsafe extern "system" fn window_proc(
                 }
                 0
             }
+            // No title bar: the page draws one. Windows works out the
+            // client area as usual, which leaves the resize borders at
+            // the sides and bottom, and then the top goes back to the
+            // window's top edge. ``lparam`` points at the window's
+            // rectangle either way (the first of three when ``wparam``
+            // is set).
+            WM_NCCALCSIZE => {
+                let rect = lparam as *mut RECT;
+                if rect.is_null() {
+                    return DefWindowProcW(hwnd, msg, wparam, lparam);
+                }
+                let top = (*rect).top;
+                let result = DefWindowProcW(hwnd, msg, wparam, lparam);
+                // A maximised window hangs over every edge of the screen
+                // by its border, top included.
+                let overhang = if IsZoomed(hwnd) != 0 {
+                    let dpi = GetDpiForWindow(hwnd).max(96);
+                    GetSystemMetricsForDpi(SM_CYSIZEFRAME, dpi)
+                        + GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi)
+                } else {
+                    0
+                };
+                (*rect).top = top + overhang;
+                result
+            }
+            WM_PAGE_ASKED => {
+                if let Some(ask) = Ask::from_wparam(wparam)
+                    && !CREATING.get()
+                {
+                    page_asked(hwnd, ask);
+                }
+                0
+            }
+            WM_SIZE => {
+                if wparam == SIZE_MAXIMIZED as WPARAM || wparam == SIZE_RESTORED as WPARAM {
+                    tell_page(hwnd);
+                }
+                DefWindowProcW(hwnd, msg, wparam, lparam)
+            }
             WM_GETMINMAXINFO => {
                 let info = lparam as *mut MINMAXINFO;
                 if !info.is_null() {
@@ -378,7 +580,27 @@ unsafe extern "system" fn window_proc(
 
 #[cfg(test)]
 mod tests {
-    use super::is_web_address;
+    use super::{Ask, POINT, is_web_address, point_lparam};
+
+    #[test]
+    fn every_ask_survives_the_trip_from_the_page() {
+        for ask in Ask::ALL {
+            assert_eq!(Ask::from_word(ask.word()), Some(ask));
+            assert_eq!(Ask::from_wparam(ask as usize), Some(ask));
+        }
+        assert_eq!(Ask::from_word("format-disk"), None);
+        assert_eq!(Ask::from_wparam(0), None);
+        assert_eq!(Ask::from_wparam(99), None);
+    }
+
+    #[test]
+    fn packs_positions_left_of_and_above_the_primary_display() {
+        assert_eq!(point_lparam(POINT { x: 3, y: 2 }), 0x0002_0003);
+        assert_eq!(
+            point_lparam(POINT { x: -1, y: -2 }),
+            0xfffe_ffff_u32 as isize
+        );
+    }
 
     #[test]
     fn only_http_addresses_go_to_the_browser() {

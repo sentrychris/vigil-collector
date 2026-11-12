@@ -4,12 +4,23 @@ import { config } from "@/config";
 import { useThemeStore } from "@/stores/theme";
 import { useSystemStore } from "@/stores/system";
 import { useControlStore } from "@/stores/control";
+import { useWindowFrame } from "@/composables/useWindowFrame";
 import PageHeader from "@/components/PageHeader.vue";
 import SiteLogo from "@/components/SiteLogo.vue";
 
 const theme = useThemeStore();
 const system = useSystemStore();
 const control = useControlStore();
+const frame = useWindowFrame();
+
+// In the Vigil window this bar is the title bar: pressing an empty part of
+// it moves the window, and a double press maximises it or puts it back.
+function barPressed(event: MouseEvent) {
+  if (!frame.framed.value || event.button !== 0) return;
+  const target = event.target as Element | null;
+  if (target?.closest("a, button, input, label, .window-buttons, .resize-edge")) return;
+  frame.ask(event.detail === 2 ? "maximize" : "drag");
+}
 const node = computed(() => {
   const region = config.app.deployment.region;
   const instance = config.app.deployment.instance;
@@ -19,7 +30,11 @@ const node = computed(() => {
 </script>
 
 <template>
-  <nav class="navbar navbar-expand-lg site-navbar shadow-lg">
+  <nav
+    class="navbar navbar-expand-lg site-navbar shadow-lg"
+    :class="{ 'is-window': frame.framed.value }"
+    @mousedown="barPressed"
+  >
     <div class="container-fluid py-2 nav-container">
       <RouterLink class="navbar-brand d-flex align-items-center gap-3" to="/">
         <SiteLogo />
@@ -128,6 +143,57 @@ const node = computed(() => {
         </div>
       </div>
     </div>
+
+    <!-- The Vigil window's own buttons; it has no title bar but this one. -->
+    <template v-if="frame.framed.value">
+      <div class="window-buttons">
+        <button
+          type="button"
+          class="window-button"
+          title="Minimise"
+          aria-label="Minimise"
+          @click="frame.ask('minimize')"
+        >
+          <svg viewBox="0 0 10 10" aria-hidden="true"><path d="M0 5.5h10" /></svg>
+        </button>
+        <button
+          type="button"
+          class="window-button"
+          :title="frame.maximized.value ? 'Restore' : 'Maximise'"
+          :aria-label="frame.maximized.value ? 'Restore' : 'Maximise'"
+          @click="frame.ask('maximize')"
+        >
+          <svg v-if="frame.maximized.value" viewBox="0 0 10 10" aria-hidden="true">
+            <path d="M2.5 2.5v-2h7v7h-2M0.5 2.5h7v7h-7z" />
+          </svg>
+          <svg v-else viewBox="0 0 10 10" aria-hidden="true">
+            <path d="M0.5 0.5h9v9h-9z" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          class="window-button window-close"
+          title="Close"
+          aria-label="Close"
+          @click="frame.ask('close')"
+        >
+          <svg viewBox="0 0 10 10" aria-hidden="true"><path d="M0.5 0.5l9 9M9.5 0.5l-9 9" /></svg>
+        </button>
+      </div>
+      <!-- The sides and bottom of the window have Windows' own resize
+           borders. The top edge is this bar, so it does the same job. -->
+      <template v-if="!frame.maximized.value">
+        <div class="resize-edge resize-top" @mousedown.left.prevent="frame.ask('resize:top')"></div>
+        <div
+          class="resize-edge resize-top-left"
+          @mousedown.left.prevent="frame.ask('resize:top-left')"
+        ></div>
+        <div
+          class="resize-edge resize-top-right"
+          @mousedown.left.prevent="frame.ask('resize:top-right')"
+        ></div>
+      </template>
+    </template>
   </nav>
 </template>
 
@@ -257,6 +323,84 @@ const node = computed(() => {
   border-color: rgba(255, 255, 255, 0.18);
 }
 
+/* ---------- The Vigil window's title bar ---------- */
+.site-navbar.is-window {
+  /* Above the loading overlay: the window must always be movable and
+     closable, whatever the page is doing. */
+  z-index: 1060;
+  user-select: none;
+}
+/* The controls sit under the window buttons rather than beside them. */
+.is-window .nav-controls { margin-top: 1.1rem; }
+
+.window-buttons {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 2;
+  display: flex;
+}
+.window-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #cbd5e1;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.window-button svg {
+  width: 10px;
+  height: 10px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+.window-close svg { shape-rendering: geometricPrecision; }
+.window-button:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+.window-button:active { background: rgba(255, 255, 255, 0.16); }
+.window-button:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: -2px;
+}
+.window-close:hover {
+  background: #c42b1c;
+  color: #ffffff;
+}
+.window-close:active { background: #b3271a; }
+
+.resize-edge {
+  position: absolute;
+  top: 0;
+  z-index: 3;
+}
+.resize-top {
+  left: 0;
+  right: 0;
+  height: 4px;
+  cursor: ns-resize;
+}
+.resize-top-left,
+.resize-top-right {
+  width: 10px;
+  height: 10px;
+}
+.resize-top-left {
+  left: 0;
+  cursor: nwse-resize;
+}
+.resize-top-right {
+  right: 0;
+  cursor: nesw-resize;
+}
+
 /* ---------- Toggle switches ---------- */
 .nav-toggle {
   position: relative;
@@ -321,6 +465,9 @@ const node = computed(() => {
 
 /* ---------- Mobile ---------- */
 @media (max-width: 991.98px) {
+  /* The menu button moves clear of the window buttons. */
+  .is-window .nav-container { padding-right: 150px; }
+  .is-window .nav-controls { margin-top: 0; }
   .navbar-collapse { padding-top: 0.75rem; }
   .nav-controls {
     justify-content: flex-start;
