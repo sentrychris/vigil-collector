@@ -10,6 +10,11 @@ mod snapshot;
 mod supervisor;
 #[cfg(windows)]
 mod tray;
+#[cfg(all(windows, any(target_env = "msvc", feature = "window-on-mingw")))]
+mod window;
+#[cfg(all(windows, not(any(target_env = "msvc", feature = "window-on-mingw"))))]
+#[path = "window_none.rs"]
+mod window;
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
@@ -25,6 +30,12 @@ use crate::supervisor::{Command, Supervisor};
 /// The most live dashboards the desktop window's own listener serves.
 /// The window uses one; the rest allow for reloads that overlap.
 const WINDOW_MAX_WS: usize = 8;
+/// Whether this build has the Vigil window (see ``window.rs`` and the
+/// ``window-on-mingw`` feature in Cargo.toml).
+const HAS_WINDOW: bool = cfg!(all(
+    windows,
+    any(target_env = "msvc", feature = "window-on-mingw")
+));
 /// With both set, any platform serves the control API on
 /// ``127.0.0.1:<port>`` with that token, for working on the Settings page
 /// (see "Development" in the README). Normally only the Windows tray
@@ -105,7 +116,7 @@ async fn main() -> anyhow::Result<()> {
     let (commands, mut requests) = mpsc::unbounded_channel::<Command>();
 
     // The desktop window's private listener, with the control API.
-    let window = private_listener(tray_mode).await;
+    let window = private_listener(tray_mode && HAS_WINDOW).await;
     let window_stop = Arc::new(Notify::new());
     let mut window_endpoint = None;
     let window_task = match window {
@@ -205,7 +216,7 @@ async fn main() -> anyhow::Result<()> {
 /// ``config::window_port``), with a token made for this run. ``None``
 /// when this run has no window, or the listener couldn't be opened (the
 /// tray then opens the browser instead).
-async fn private_listener(tray_mode: bool) -> Option<(tokio::net::TcpListener, String)> {
+async fn private_listener(window: bool) -> Option<(tokio::net::TcpListener, String)> {
     use std::net::{Ipv4Addr, SocketAddr};
     let local = |port| SocketAddr::from((Ipv4Addr::LOCALHOST, port));
 
@@ -227,7 +238,7 @@ async fn private_listener(tray_mode: bool) -> Option<(tokio::net::TcpListener, S
             }
         };
     }
-    if !tray_mode {
+    if !window {
         return None;
     }
 

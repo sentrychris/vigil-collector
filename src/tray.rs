@@ -2,7 +2,8 @@
 //!
 //! Started normally (double-clicked, or from a terminal), the collector
 //! moves into the background and puts an icon in the notification area,
-//! with a right-click menu to restart or quit it. It works like this:
+//! with a right-click menu to open, stop, start, restart or quit it. It
+//! works like this:
 //!
 //! 1. The process that was started is the *launcher*. It starts a copy of
 //!    the program with no console, passes it the same arguments, and relays
@@ -14,10 +15,12 @@
 //! 2. The copy is the *tray process*. It runs the collector as usual and
 //!    owns the icon. Its log still goes to the log file. The menu also
 //!    shows how many dashboards are connected and the version, and
-//!    double-clicking the icon opens the dashboard in the browser.
+//!    double-clicking the icon opens the Vigil window (``window.rs``):
+//!    the dashboard as a desktop program, with a Settings page. Without
+//!    WebView2 on the computer, it opens the dashboard in the browser.
 //!
 //! Only one copy runs per computer (see ``Instance``). Started again while
-//! one is running, it opens that copy's dashboard (double-clicked) or says
+//! one is running, it opens that copy's window (double-clicked) or says
 //! where it is (from a terminal) and exits.
 //!
 //! ``--foreground`` skips all of this and runs in the console as before,
@@ -38,7 +41,8 @@ use std::thread::JoinHandle;
 
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::TrayEvent;
+use crate::supervisor::Command as Request;
+use crate::window::{self, Page};
 use windows_sys::Win32::Foundation::{
     CloseHandle, ERROR_ACCESS_DENIED, ERROR_ALREADY_EXISTS, GetLastError, HANDLE, HWND, LPARAM,
     LRESULT, POINT, WPARAM,
@@ -61,7 +65,7 @@ use windows_sys::Win32::UI::HiDpi::{
     SetThreadDpiAwarenessContext,
 };
 use windows_sys::Win32::UI::Shell::{
-    NIF_ICON, NIF_MESSAGE, NIF_SHOWTIP, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_SETVERSION,
+    NIF_ICON, NIF_MESSAGE, NIF_SHOWTIP, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY, NIM_SETVERSION,
     NOTIFYICON_VERSION_4, NOTIFYICONDATAW, Shell_NotifyIconW, ShellExecuteW,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
@@ -71,8 +75,9 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     MB_ICONERROR, MB_OK, MENUITEMINFOW, MF_GRAYED, MF_SEPARATOR, MF_STRING, MIIM_BITMAP, MSG,
     MessageBoxW, PostMessageW, PostQuitMessage, RegisterClassW, RegisterWindowMessageW,
     SM_CXSMICON, SW_HIDE, SW_SHOWNORMAL, SetForegroundWindow, SetMenuDefaultItem, SetMenuItemInfoW,
-    ShowWindow, TPM_RIGHTBUTTON, TrackPopupMenu, TranslateMessage, WM_APP, WM_CLOSE, WM_COMMAND,
-    WM_CONTEXTMENU, WM_DESTROY, WM_ENDSESSION, WM_LBUTTONDBLCLK, WM_NULL, WM_RBUTTONUP, WNDCLASSW,
+    SetWindowTextW, ShowWindow, TPM_RIGHTBUTTON, TrackPopupMenu, TranslateMessage, WM_APP,
+    WM_CLOSE, WM_COMMAND, WM_CONTEXTMENU, WM_DESTROY, WM_ENDSESSION, WM_LBUTTONDBLCLK, WM_NULL,
+    WM_RBUTTONUP, WNDCLASSW,
 };
 
 /// Set on the tray process so it knows it is the copy, not the launcher.
@@ -82,7 +87,6 @@ const CHILD_ENV: &str = "VIGIL_TRAY_CHILD";
 pub const COLOR_ENV: &str = "VIGIL_FORCE_COLOR";
 /// Set on the tray process when it was double-clicked: if the port is
 /// taken, it moves on to the next free one (see ``server::bind``).
-/// Restarts inherit it.
 const FREE_PORT_ENV: &str = "VIGIL_FIND_FREE_PORT";
 /// Printed by the tray process once it is listening, so the launcher
 /// knows when to exit even with logging turned off. Never shown.
@@ -97,9 +101,16 @@ const ID_CONNECTIONS: usize = 3;
 const ID_VERSION: usize = 4;
 const ID_OPEN: usize = 5;
 const ID_ADDRESS: usize = 6;
+const ID_BROWSER: usize = 7;
+const ID_SETTINGS: usize = 8;
+/// "Stop serving" or "Start serving", whichever applies.
+const ID_SERVING: usize = 9;
 const WM_TRAY: u32 = WM_APP + 1;
-/// Posted by a second copy to the running one: open the dashboard.
+/// Posted by a second copy to the running one: open the window.
 const WM_OPEN_DASHBOARD: u32 = WM_APP + 2;
+/// Posted by ``TrayHandle::set_url``: the server moved, stopped or
+/// started. ``lparam`` is a ``Box<Option<String>>`` to take over.
+const WM_SERVER_CHANGED: u32 = WM_APP + 3;
 /// Held by the running copy, whatever its mode. ``Global\`` makes it one
 /// per computer rather than one per signed-in user, so a ``SYSTEM`` task
 /// and a tray icon can't both run.
@@ -115,8 +126,10 @@ const DETACHED_PROCESS: u32 = 0x0000_0008;
 const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
 
 const ICON: &[u8] = include_bytes!("../web/public/favicon.ico");
-/// The dot beside the connection count: the dashboard's "success" green.
+/// The dot beside the connection count: the dashboard's "success" green
+/// while serving, its muted grey while stopped.
 const DOT_RGB: [u8; 3] = [0x41, 0xb8, 0x83];
+const DOT_STOPPED_RGB: [u8; 3] = [0x94, 0xa3, 0xb8];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
@@ -161,7 +174,7 @@ fn owns_console() -> bool {
     unsafe { GetConsoleProcessList(ids.as_mut_ptr(), ids.len() as u32) == 1 }
 }
 
-fn wide(s: impl AsRef<OsStr>) -> Vec<u16> {
+pub(crate) fn wide(s: impl AsRef<OsStr>) -> Vec<u16> {
     s.as_ref().encode_wide().chain(Some(0)).collect()
 }
 
@@ -390,8 +403,8 @@ fn show_running() -> bool {
 fn already_running_message() -> String {
     match running_url() {
         Some(url) => format!(
-            "Vigil is already running at {url}. Use its tray icon to restart \
-             or quit it."
+            "Vigil is already running at {url}. Use its tray icon to open, \
+             restart or quit it."
         ),
         None => "Vigil is already running on this computer.".into(),
     }
@@ -402,14 +415,12 @@ pub fn find_free_port() -> bool {
     std::env::var_os(FREE_PORT_ENV).is_some_and(|v| v == "1")
 }
 
-/// Starts a fresh tray process with the same arguments. Used by Restart,
-/// after this one has stopped listening.
-pub fn respawn() -> std::io::Result<()> {
-    tray_command()?
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map(|_| ())
+/// Where the Vigil window loads from: the tray process's private
+/// listener and its secret for this run (see ``server::control``).
+pub struct WindowEndpoint {
+    /// ``http://127.0.0.1:<port>``
+    pub origin: String,
+    pub token: String,
 }
 
 /// The tray icon. It lives on its own thread, which runs the Win32
@@ -420,18 +431,21 @@ pub struct Tray {
 }
 
 impl Tray {
-    /// ``url`` is the dashboard's address, shown in the tooltip and opened
-    /// by a double-click. ``connections`` is the server's count of open
-    /// WebSocket sessions, read each time the menu opens.
+    /// ``url`` is the dashboard's address, shown in the tooltip and the
+    /// menu. ``connections`` is the server's count of open WebSocket
+    /// sessions, read each time the menu opens. ``window`` is where the
+    /// Vigil window loads from; without it a double-click opens the
+    /// browser.
     pub fn start(
         url: String,
-        events: UnboundedSender<TrayEvent>,
+        requests: UnboundedSender<Request>,
         connections: Arc<AtomicUsize>,
+        window: Option<WindowEndpoint>,
     ) -> anyhow::Result<Self> {
         let (ready_tx, ready_rx) = std_mpsc::channel();
         let thread = std::thread::Builder::new()
             .name("tray".into())
-            .spawn(move || run(url, events, connections, ready_tx))?;
+            .spawn(move || run(url, requests, connections, window, ready_tx))?;
         match ready_rx.recv() {
             Ok(Ok(hwnd)) => Ok(Self {
                 hwnd,
@@ -442,6 +456,35 @@ impl Tray {
                 Err(anyhow::anyhow!(e))
             }
             Err(_) => Err(anyhow::anyhow!("the tray thread stopped during startup")),
+        }
+    }
+
+    /// A way to tell the tray about the server from another thread.
+    pub fn handle(&self) -> TrayHandle {
+        TrayHandle { hwnd: self.hwnd }
+    }
+}
+
+/// Tells the tray thread when the server moves, stops or starts, so the
+/// tooltip, the menu and the hidden window's title (which a second copy
+/// reads) stay right.
+#[derive(Clone, Copy)]
+pub struct TrayHandle {
+    hwnd: usize,
+}
+
+impl TrayHandle {
+    /// ``url`` is the dashboard's address now, or ``None`` while the
+    /// server is stopped.
+    pub fn set_url(&self, url: Option<String>) {
+        let message = Box::into_raw(Box::new(url));
+        // SAFETY: the box is handed to the tray thread, which rebuilds and
+        // frees it in ``window_proc``. If the message can't be posted (the
+        // tray has gone), it is taken back and freed here.
+        unsafe {
+            if PostMessageW(self.hwnd as HWND, WM_SERVER_CHANGED, 0, message as LPARAM) == 0 {
+                drop(Box::from_raw(message));
+            }
         }
     }
 }
@@ -459,22 +502,68 @@ impl Drop for Tray {
 
 struct State {
     icon: NOTIFYICONDATAW,
-    events: UnboundedSender<TrayEvent>,
+    requests: UnboundedSender<Request>,
     taskbar_created: u32,
     connections: Arc<AtomicUsize>,
-    url: Vec<u16>,
+    /// The dashboard's address, or ``None`` while the server is stopped.
+    url: Option<String>,
+    window: Option<WindowEndpoint>,
+    /// Whether the missing-WebView2 warning has been logged, so it is
+    /// said once rather than at every double-click.
+    warned: bool,
 }
 
 thread_local! {
     static STATE: RefCell<Option<State>> = const { RefCell::new(None) };
 }
 
-fn send(event: TrayEvent) {
+fn send(request: Request) {
     STATE.with_borrow(|state| {
         if let Some(state) = state {
-            let _ = state.events.send(event);
+            let _ = state.requests.send(request);
         }
     });
+}
+
+/// The tooltip for the icon: the name, and the address while serving.
+fn tooltip(url: Option<&str>) -> String {
+    match url {
+        Some(url) => format!("Vigil\n{url}"),
+        None => "Vigil\nStopped".into(),
+    }
+}
+
+/// Writes ``text`` into the icon's tooltip field, cut to fit.
+fn set_tip(icon: &mut NOTIFYICONDATAW, text: &str) {
+    let tip: Vec<u16> = text.encode_utf16().take(icon.szTip.len() - 1).collect();
+    icon.szTip = [0; 128];
+    icon.szTip[..tip.len()].copy_from_slice(&tip);
+}
+
+/// The hidden window's title: ``WINDOW_TITLE`` then the address, which
+/// is how a second copy finds out where this one is.
+fn window_title(url: Option<&str>) -> Vec<u16> {
+    wide(format!("{WINDOW_TITLE}{}", url.unwrap_or_default()))
+}
+
+/// The server moved, stopped or started: bring the tooltip, the menu's
+/// address and the hidden window's title up to date.
+fn server_changed(hwnd: HWND, url: Option<String>) {
+    let icon = STATE.with_borrow_mut(|state| {
+        let state = state.as_mut()?;
+        set_tip(&mut state.icon, &tooltip(url.as_deref()));
+        state.url = url.clone();
+        Some(state.icon)
+    });
+    let title = window_title(url.as_deref());
+    // SAFETY: the icon struct is fully initialised, the title is
+    // NUL-terminated and the window is this thread's own.
+    unsafe {
+        if let Some(icon) = icon {
+            Shell_NotifyIconW(NIM_MODIFY, &icon);
+        }
+        SetWindowTextW(hwnd, title.as_ptr());
+    }
 }
 
 fn add_icon() {
@@ -490,8 +579,9 @@ fn add_icon() {
 
 fn run(
     url: String,
-    events: UnboundedSender<TrayEvent>,
+    requests: UnboundedSender<Request>,
     connections: Arc<AtomicUsize>,
+    window: Option<WindowEndpoint>,
     ready: std_mpsc::Sender<Result<usize, String>>,
 ) {
     // SAFETY: all calls below are plain Win32 calls on this thread, with
@@ -501,8 +591,9 @@ fn run(
         // created at the size the taskbar really draws it, and the menu
         // isn't bitmap-stretched on scaled displays.
         SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-        // ShellExecuteW (double-click opens the dashboard) wants COM set up
-        // on the calling thread, single-threaded as for any UI thread.
+        // ShellExecuteW (opening the browser) and the Vigil window's
+        // WebView2 control both want COM set up on the calling thread,
+        // single-threaded as for any UI thread.
         CoInitializeEx(std::ptr::null(), COINIT_APARTMENTTHREADED as u32);
 
         let instance = GetModuleHandleW(std::ptr::null());
@@ -514,7 +605,7 @@ fn run(
             ..Default::default()
         };
         RegisterClassW(&wc);
-        let title = wide(format!("{WINDOW_TITLE}{url}"));
+        let title = window_title(Some(&url));
         // A hidden top-level window rather than a message-only one: only
         // top-level windows receive the TaskbarCreated broadcast (sent when
         // Explorer restarts) and WM_ENDSESSION.
@@ -552,16 +643,16 @@ fn run(
             ..Default::default()
         };
         icon.Anonymous.uVersion = NOTIFYICON_VERSION_4;
-        let tooltip = format!("Vigil\n{url}");
-        let tip: Vec<u16> = tooltip.encode_utf16().take(icon.szTip.len() - 1).collect();
-        icon.szTip[..tip.len()].copy_from_slice(&tip);
+        set_tip(&mut icon, &tooltip(Some(&url)));
 
         STATE.set(Some(State {
             icon,
-            events,
+            requests,
             taskbar_created: RegisterWindowMessageW(wide("TaskbarCreated").as_ptr()),
             connections,
-            url: wide(&url),
+            url: Some(url),
+            window,
+            warned: false,
         }));
 
         if Shell_NotifyIconW(NIM_ADD, &icon) == 0 {
@@ -582,6 +673,7 @@ fn run(
             DispatchMessageW(&msg);
         }
 
+        window::close();
         STATE.set(None);
         if !hicon.is_null() {
             DestroyIcon(hicon);
@@ -591,7 +683,7 @@ fn run(
 
 /// The Vigil logo as an icon ``size`` pixels square, from the image in
 /// ``favicon.ico`` that suits that size best. Null if it couldn't be made.
-fn load_icon(size: i32) -> HICON {
+pub(crate) fn load_icon(size: i32) -> HICON {
     let Some(range) = crate::ico::pick(ICON, size as u32) else {
         return std::ptr::null_mut();
     };
@@ -613,16 +705,22 @@ fn load_icon(size: i32) -> HICON {
 /// window when an item is chosen.
 ///
 /// ```text
-/// [logo] Open dashboard              (bold: what a double-click does)
+/// [logo] Open Vigil                  (bold: what a double-click does)
+///        Open in browser
+///        Settings
 /// ──────────────────────────────────
 ///  (●)   Monitoring · 1 dashboard connected
 ///        http://127.0.0.1:4500       (greyed)
 /// ──────────────────────────────────
+///        Stop serving                (Start serving, while stopped)
 ///        Restart
 ///        Quit
 /// ──────────────────────────────────
 ///        Vigil v0.2.0                (greyed)
 /// ```
+///
+/// While the server is stopped the dot is grey, the status line says so,
+/// and there is no address or browser to open.
 unsafe fn show_menu(hwnd: HWND) {
     let Some((connections, url)) = STATE.with_borrow(|s| {
         s.as_ref()
@@ -630,11 +728,21 @@ unsafe fn show_menu(hwnd: HWND) {
     }) else {
         return;
     };
-    let open = wide("Open dashboard");
-    let status = wide(status_text(connections));
+    let serving = url.is_some();
+    let open = wide("Open Vigil");
+    let browser = wide("Open in browser");
+    let settings = wide("Settings");
+    let status = wide(status_text(serving.then_some(connections)));
+    let address = wide(url.unwrap_or_default());
+    let toggle = wide(if serving {
+        "Stop serving"
+    } else {
+        "Start serving"
+    });
     let restart = wide("Restart");
     let quit = wide("Quit");
     let version = wide(format!("Vigil v{}", env!("CARGO_PKG_VERSION")));
+    let unless_serving = if serving { 0 } else { MF_GRAYED };
     // SAFETY (caller): called on the tray thread with its live window.
     unsafe {
         let menu = CreatePopupMenu();
@@ -643,12 +751,22 @@ unsafe fn show_menu(hwnd: HWND) {
         }
         AppendMenuW(menu, MF_STRING, ID_OPEN, open.as_ptr());
         SetMenuDefaultItem(menu, ID_OPEN as u32, 0);
+        AppendMenuW(
+            menu,
+            MF_STRING | unless_serving,
+            ID_BROWSER,
+            browser.as_ptr(),
+        );
+        AppendMenuW(menu, MF_STRING, ID_SETTINGS, settings.as_ptr());
         AppendMenuW(menu, MF_SEPARATOR, 0, std::ptr::null());
-        // Not greyed, or Windows draws the green dot grey too. Clicking it
-        // does nothing.
+        // Not greyed, or Windows draws the dot grey too. Clicking it does
+        // nothing.
         AppendMenuW(menu, MF_STRING, ID_CONNECTIONS, status.as_ptr());
-        AppendMenuW(menu, MF_STRING | MF_GRAYED, ID_ADDRESS, url.as_ptr());
+        if serving {
+            AppendMenuW(menu, MF_STRING | MF_GRAYED, ID_ADDRESS, address.as_ptr());
+        }
         AppendMenuW(menu, MF_SEPARATOR, 0, std::ptr::null());
+        AppendMenuW(menu, MF_STRING, ID_SERVING, toggle.as_ptr());
         AppendMenuW(menu, MF_STRING, ID_RESTART, restart.as_ptr());
         AppendMenuW(menu, MF_STRING, ID_QUIT, quit.as_ptr());
         AppendMenuW(menu, MF_SEPARATOR, 0, std::ptr::null());
@@ -659,7 +777,8 @@ unsafe fn show_menu(hwnd: HWND) {
         // sized for the menu's DPI.
         let size = GetSystemMetricsForDpi(SM_CXSMICON, GetDpiForWindow(hwnd)).max(16);
         let logo = logo_bitmap(size);
-        let dot = bitmap_from_pixels(size, &dot_pixels(size as usize));
+        let colour = if serving { DOT_RGB } else { DOT_STOPPED_RGB };
+        let dot = bitmap_from_pixels(size, &dot_pixels(size as usize, colour));
         for (id, bitmap) in [(ID_OPEN, logo), (ID_CONNECTIONS, dot)] {
             if !bitmap.is_null() {
                 let item = MENUITEMINFOW {
@@ -687,31 +806,70 @@ unsafe fn show_menu(hwnd: HWND) {
     }
 }
 
-/// The menu's status line for ``connections`` open dashboards.
-fn status_text(connections: usize) -> String {
+/// The menu's status line: how many dashboards are connected, or that
+/// the server is stopped (``None``).
+fn status_text(connections: Option<usize>) -> String {
     match connections {
-        0 => "Monitoring \u{b7} no dashboards connected".into(),
-        1 => "Monitoring \u{b7} 1 dashboard connected".into(),
-        n => format!("Monitoring \u{b7} {n} dashboards connected"),
+        None => "Stopped \u{b7} not serving".into(),
+        Some(0) => "Monitoring \u{b7} no dashboards connected".into(),
+        Some(1) => "Monitoring \u{b7} 1 dashboard connected".into(),
+        Some(n) => format!("Monitoring \u{b7} {n} dashboards connected"),
     }
 }
 
-/// Opens the dashboard in the default browser.
-fn open_dashboard() {
-    let Some(url) = STATE.with_borrow(|s| s.as_ref().map(|s| s.url.clone())) else {
-        return;
-    };
+/// Opens a web address or a file with whatever Windows uses for it.
+/// Call on a thread with COM set up, as the tray thread is.
+pub(crate) fn open_external(target: &str) {
     let open = wide("open");
+    let target = wide(target);
     // SAFETY: both strings are NUL-terminated and outlive the call.
     unsafe {
         ShellExecuteW(
             std::ptr::null_mut(),
             open.as_ptr(),
-            url.as_ptr(),
+            target.as_ptr(),
             std::ptr::null(),
             std::ptr::null(),
             SW_SHOWNORMAL,
         );
+    }
+}
+
+/// Opens the dashboard in the default browser, if the server is running.
+fn open_browser() {
+    if let Some(url) = STATE.with_borrow(|s| s.as_ref().and_then(|s| s.url.clone())) {
+        open_external(&url);
+    }
+}
+
+/// Shows the Vigil window on ``page``. Where there can be no window (no
+/// WebView2 on this computer, or no private listener), the dashboard
+/// opens in the browser and Settings opens the settings file.
+fn open_vigil(page: Page) {
+    let endpoint = STATE.with_borrow(|s| {
+        s.as_ref()
+            .and_then(|s| s.window.as_ref())
+            .map(|w| (w.origin.clone(), w.token.clone()))
+    });
+    // Nothing of STATE is borrowed while the window is made: creating the
+    // WebView2 control runs the message loop, which calls back in here.
+    let shown = match endpoint {
+        Some((origin, token)) => window::show(&origin, &token, page),
+        None => Err("its local listener isn't running".into()),
+    };
+    let Err(reason) = shown else {
+        return;
+    };
+    let first = STATE.with_borrow_mut(|s| {
+        s.as_mut()
+            .is_some_and(|s| !std::mem::replace(&mut s.warned, true))
+    });
+    if first {
+        tracing::warn!("No Vigil window, so using the browser instead: {reason}");
+    }
+    match page {
+        Page::Dashboard => open_browser(),
+        Page::Settings => open_external(&crate::config::settings_file().display().to_string()),
     }
 }
 
@@ -814,7 +972,7 @@ fn premultiply(pixel: u32) -> u32 {
 /// The dot's pixels, row by row from the top, as premultiplied BGRA (the
 /// layout ``AlphaBlend`` expects): a filled circle a little over half the
 /// width, centred, with its edge smoothed by sampling each pixel 4 x 4.
-fn dot_pixels(size: usize) -> Vec<u32> {
+fn dot_pixels(size: usize, rgb: [u8; 3]) -> Vec<u32> {
     const SAMPLES: usize = 4;
     let centre = size as f32 / 2.0;
     let radius = size as f32 * 0.28;
@@ -832,7 +990,7 @@ fn dot_pixels(size: usize) -> Vec<u32> {
                 }
             }
             let alpha = (inside * 255 / (SAMPLES * SAMPLES)) as u32;
-            let [r, g, b] = DOT_RGB.map(|c| u32::from(c) * alpha / 255);
+            let [r, g, b] = rgb.map(|c| u32::from(c) * alpha / 255);
             out.push(alpha << 24 | r << 16 | g << 8 | b);
         }
     }
@@ -854,27 +1012,45 @@ unsafe extern "system" fn window_proc(
                 let event = (lparam as u32) & 0xFFFF;
                 match event {
                     WM_CONTEXTMENU | WM_RBUTTONUP => show_menu(hwnd),
-                    WM_LBUTTONDBLCLK => open_dashboard(),
+                    WM_LBUTTONDBLCLK => open_vigil(Page::Dashboard),
                     _ => {}
                 }
                 0
             }
             WM_OPEN_DASHBOARD => {
-                open_dashboard();
+                open_vigil(Page::Dashboard);
+                0
+            }
+            WM_SERVER_CHANGED => {
+                // SAFETY: only ``TrayHandle::set_url`` posts this, with a
+                // box it has given up.
+                let url = *Box::from_raw(lparam as *mut Option<String>);
+                server_changed(hwnd, url);
                 0
             }
             WM_COMMAND => {
                 match wparam & 0xFFFF {
-                    ID_RESTART => send(TrayEvent::Restart),
-                    ID_QUIT => send(TrayEvent::Quit),
-                    ID_OPEN => open_dashboard(),
+                    ID_RESTART => send(Request::Restart(None)),
+                    ID_QUIT => send(Request::Quit),
+                    ID_OPEN => open_vigil(Page::Dashboard),
+                    ID_BROWSER => open_browser(),
+                    ID_SETTINGS => open_vigil(Page::Settings),
+                    ID_SERVING => {
+                        let serving =
+                            STATE.with_borrow(|s| s.as_ref().is_some_and(|s| s.url.is_some()));
+                        send(if serving {
+                            Request::Stop(None)
+                        } else {
+                            Request::Start(None)
+                        });
+                    }
                     _ => {}
                 }
                 0
             }
             // Signing out or shutting down: stop cleanly while there's time.
             WM_ENDSESSION if wparam != 0 => {
-                send(TrayEvent::Quit);
+                send(Request::Quit);
                 0
             }
             WM_CLOSE => {
@@ -901,7 +1077,7 @@ unsafe extern "system" fn window_proc(
 
 #[cfg(test)]
 mod tests {
-    use super::{DOT_RGB, dot_pixels, premultiply, status_text, strip_ansi};
+    use super::{DOT_RGB, dot_pixels, premultiply, status_text, strip_ansi, tooltip};
 
     #[test]
     fn strips_colour_codes() {
@@ -913,9 +1089,28 @@ mod tests {
 
     #[test]
     fn counts_dashboards_in_words() {
-        assert_eq!(status_text(0), "Monitoring \u{b7} no dashboards connected");
-        assert_eq!(status_text(1), "Monitoring \u{b7} 1 dashboard connected");
-        assert_eq!(status_text(3), "Monitoring \u{b7} 3 dashboards connected");
+        assert_eq!(
+            status_text(Some(0)),
+            "Monitoring \u{b7} no dashboards connected"
+        );
+        assert_eq!(
+            status_text(Some(1)),
+            "Monitoring \u{b7} 1 dashboard connected"
+        );
+        assert_eq!(
+            status_text(Some(3)),
+            "Monitoring \u{b7} 3 dashboards connected"
+        );
+        assert_eq!(status_text(None), "Stopped \u{b7} not serving");
+    }
+
+    #[test]
+    fn tooltip_says_where_or_that_it_is_stopped() {
+        assert_eq!(
+            tooltip(Some("http://127.0.0.1:4500")),
+            "Vigil\nhttp://127.0.0.1:4500"
+        );
+        assert_eq!(tooltip(None), "Vigil\nStopped");
     }
 
     #[test]
@@ -928,7 +1123,7 @@ mod tests {
     #[test]
     fn draws_a_round_green_dot() {
         let size = 16;
-        let pixels = dot_pixels(size);
+        let pixels = dot_pixels(size, DOT_RGB);
         assert_eq!(pixels.len(), size * size);
         // Corners are transparent, the centre is solid green.
         assert_eq!(pixels[0], 0);
