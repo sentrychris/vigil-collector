@@ -40,8 +40,33 @@ body::before {
   min-height: 100vh;
 }
 
+/* Everything below the navbar. */
+.app-body {
+  display: flex;
+  flex-direction: column;
+  flex-grow: 1;
+}
+
 .page-wrapper {
   flex-grow: 1;
+}
+
+/* The Vigil window: the navbar is the window's title bar, so it stays put
+   and the page scrolls beneath it. That starts the scrollbar below the
+   bar, which then reaches the window's corner with its close button. */
+html.vigil-window,
+html.vigil-window body {
+  overflow: hidden;
+}
+html.vigil-window #app {
+  height: 100vh;
+}
+html.vigil-window .app-body {
+  /* Takes the room the bar leaves, rather than squeezing the bar. */
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  outline: none;
 }
 
 p {
