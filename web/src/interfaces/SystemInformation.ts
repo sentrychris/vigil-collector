@@ -42,7 +42,11 @@ export interface ProcessInformation {
   pid: number;
   username: string;
   name: string;
+  /** MiB. */
   mem: number;
+  /** Percent of one core, so it can pass 100 on a machine with several.
+   *  Collectors before 0.3 leave it out of ``processes``. */
+  cpu?: number;
 }
 
 export interface SystemMetrics {

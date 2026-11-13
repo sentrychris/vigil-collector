@@ -18,11 +18,15 @@ import PieChart from "@/components/charts/PieChart.vue";
 import ServiceStatus from "@/components/ServiceStatus.vue";
 import DiskList from "@/components/stats/DiskList.vue";
 import DataTable from "@/components/DataTable.vue";
+import CompactDashboard from "@/components/compact/CompactDashboard.vue";
+import { useCompactLayout } from "@/composables/useCompactLayout";
 
 useDocumentTitle("Host Overview");
 
 const loader = useLoadingStore();
 const system = useSystemStore();
+// The Vigil window at its usual small size gets a layout of its own.
+const { compact } = useCompactLayout();
 
 const processesView = ref<"charts" | "table">("charts");
 const processesData = computed(() =>
@@ -44,7 +48,8 @@ onBeforeMount(() => {
 
 <template>
   <Transition name="fade">
-    <div v-if="loader.loaded" class="container-fluid py-0 py-md-2 dashboard-root">
+    <CompactDashboard v-if="loader.loaded && compact" />
+    <div v-else-if="loader.loaded" class="container-fluid py-0 py-md-2 dashboard-root">
       <!-- Top stat cards -->
       <section id="statistics" class="page-section mt-0">
         <div class="row g-2">

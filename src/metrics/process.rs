@@ -10,6 +10,7 @@ use super::round2;
 #[derive(Default)]
 struct Aggregated {
     mem_mb: f64,
+    cpu_pct: f64,
     pids: Vec<u32>,
     usernames: BTreeSet<String>,
 }
@@ -21,6 +22,8 @@ struct AggregatedCpu {
     pid: u32,
     pid_cpu: f64,
     usernames: BTreeSet<String>,
+    /// Every member, for the group's memory.
+    members: Aggregated,
 }
 
 /// Entries the top-N lists never show. On Windows sysinfo reports pid 0,
@@ -154,6 +157,7 @@ pub fn collect_top(sys: &System, users: &Users) -> Vec<Process> {
 
         let entry = by_name.entry(name).or_default();
         entry.mem_mb += mem_mb;
+        entry.cpu_pct += proc_.cpu_usage() as f64;
         entry.pids.push(pid.as_u32());
         if let Some(username) = username_of(proc_, users) {
             entry.usernames.insert(username);
@@ -208,6 +212,7 @@ pub fn collect_top(sys: &System, users: &Users) -> Vec<Process> {
             name,
             username: agg.usernames.into_iter().collect::<Vec<_>>().join(", "),
             mem: round2(agg.mem_mb),
+            cpu: round2(agg.cpu_pct),
         })
         .collect()
 }
@@ -259,6 +264,8 @@ pub fn collect_top_cpu(sys: &System, users: &Users) -> Vec<ProcessCpu> {
 
         let entry = by_name.entry(name).or_default();
         entry.cpu_pct += cpu_pct;
+        entry.members.mem_mb += proc_.memory() as f64 / (1024.0 * 1024.0);
+        entry.members.pids.push(pid_u);
         // Keep a single representative pid per name group — the
         // highest-CPU one, so clicking through to "details" lands on the
         // process actually driving the load. (Ties keep the lower pid so
@@ -285,6 +292,11 @@ pub fn collect_top_cpu(sys: &System, users: &Users) -> Vec<ProcessCpu> {
     const TOP_N: usize = 10;
     entries.truncate(TOP_N);
 
+    // Memory for the ten that made it, by the accounting ``collect_top``
+    // uses, so a process in both lists shows one figure. Where that is PSS
+    // it costs a read per member, which is why it waits until here.
+    let pss = pss_supported(sys);
+
     entries
         .into_iter()
         .map(|(name, agg)| ProcessCpu {
@@ -292,6 +304,11 @@ pub fn collect_top_cpu(sys: &System, users: &Users) -> Vec<ProcessCpu> {
             name,
             username: agg.usernames.into_iter().collect::<Vec<_>>().join(", "),
             cpu: round2(agg.cpu_pct),
+            mem: round2(if pss {
+                group_pss_mb(sys, &agg.members)
+            } else {
+                agg.members.mem_mb
+            }),
         })
         .collect()
 }

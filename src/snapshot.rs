@@ -97,6 +97,9 @@ pub struct Process {
     pub name: String,
     pub username: String,
     pub mem: f64,
+    /// CPU% of the group over the last scan, on sysinfo's scale: 100 is
+    /// one whole core.
+    pub cpu: f64,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -105,6 +108,9 @@ pub struct ProcessCpu {
     pub name: String,
     pub username: String,
     pub cpu: f64,
+    /// Memory of the group in MiB, by the same accounting as
+    /// ``Process::mem`` (see ``processes_metric``).
+    pub mem: f64,
 }
 
 #[derive(Serialize, Clone, Debug)]

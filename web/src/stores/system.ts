@@ -6,6 +6,15 @@ import { defineStore } from "pinia";
 import { useLoadingStore } from "./loading";
 import { config } from "@/config";
 
+/** How many readings the compact window's sparklines keep: a minute's
+ *  worth at the collector's usual one a second. */
+export const HISTORY_LENGTH = 60;
+
+function remember(series: number[], value: number) {
+  series.push(Number.isFinite(value) ? value : 0);
+  if (series.length > HISTORY_LENGTH) series.splice(0, series.length - HISTORY_LENGTH);
+}
+
 export const useSystemStore = defineStore("system", {
   state: () => ({
     data: { disks: [] } as unknown as SystemResponse,
@@ -40,6 +49,16 @@ export const useSystemStore = defineStore("system", {
       },
       uptime: null,
       processes: [],
+      processes_by_cpu: [],
+    },
+    // The last minute of live readings, oldest first, for sparklines.
+    // Kept here rather than in a chart so it survives a change of view.
+    history: {
+      cpu: [] as number[],
+      mem: [] as number[],
+      diskIo: [] as number[],
+      rx: [] as number[],
+      tx: [] as number[],
     },
     connection: <WebSocket | null>null,
     connectionType: <ConnectionTypes | null>null,
@@ -164,6 +183,15 @@ export const useSystemStore = defineStore("system", {
     liveUpdate(realtime: RealtimeSystemResponse) {
       this.$patch({ realtime });
       this.realtime.processes = realtime.processes;
+      this.realtime.processes_by_cpu = realtime.processes_by_cpu ?? [];
+      remember(this.history.cpu, realtime.cpu?.usage);
+      remember(this.history.mem, realtime.mem?.percent);
+      remember(
+        this.history.diskIo,
+        (realtime.disk_io?.read_bytes_per_sec ?? 0) + (realtime.disk_io?.write_bytes_per_sec ?? 0),
+      );
+      remember(this.history.rx, realtime.network?.rx_bytes_per_sec ?? 0);
+      remember(this.history.tx, realtime.network?.tx_bytes_per_sec ?? 0);
     },
     setConnectionType(type: ConnectionTypes) {
       this.connectionType = type;

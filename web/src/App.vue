@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { onBeforeUnmount, onMounted, ref, watch, watchEffect } from "vue";
 import { RouterView, useRoute, useRouter } from "vue-router";
 import SiteNavbar from "./components/SiteNavbar.vue";
 import SiteFooter from "./components/SiteFooter.vue";
@@ -7,6 +7,7 @@ import PageLoading from "@/components/PageLoading.vue";
 import { useThemeStore } from "./stores/theme";
 import { useControlStore } from "./stores/control";
 import { useWindowFrame } from "@/composables/useWindowFrame";
+import { useCompactLayout } from "@/composables/useCompactLayout";
 
 const theme = useThemeStore();
 theme.load();
@@ -19,6 +20,10 @@ const router = useRouter();
 // anything is drawn so the layout doesn't jump.
 const { framed } = useWindowFrame();
 if (framed.value) document.documentElement.classList.add("vigil-window");
+// At its usual small size the window is tighter still: a slimmer bar and
+// no footer (see useCompactLayout).
+const { compact } = useCompactLayout();
+watchEffect(() => document.documentElement.classList.toggle("vigil-compact", compact.value));
 const body = ref<HTMLElement | null>(null);
 // A new page starts at its top, as it would in a browser.
 watch(

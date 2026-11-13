@@ -17,6 +17,7 @@ export interface SystemResponse {
   network: NetworkRateInformation;
   platform: PlatformInformation;
   processes: ProcessInformation[];
+  processes_by_cpu?: ProcessInformation[];
   user: string;
 }
 
@@ -28,4 +29,5 @@ export interface RealtimeSystemResponse {
   network: NetworkRateInformation;
   uptime?: string | null;
   processes: ProcessInformation[];
+  processes_by_cpu?: ProcessInformation[];
 }

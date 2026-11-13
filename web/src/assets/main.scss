@@ -70,6 +70,24 @@ html.vigil-window .app-body {
   outline: none;
 }
 
+/* The window at its usual small size (see useCompactLayout): the compact
+   dashboard fills it edge to edge, with nothing under it. */
+html.vigil-compact .site-footer {
+  display: none;
+}
+/* Settings keeps its layout and is drawn a size down, in proportion to
+   the compact dashboard. */
+html.vigil-compact .settings-root {
+  zoom: 0.8;
+}
+html.vigil-compact ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+html.vigil-compact ::-webkit-scrollbar-thumb {
+  border-width: 2px;
+}
+
 /* ─── Scrollbars ──────────────────────────────────────────────────────────
    Slim, rounded and in the theme's own tones, with no visible track, for
    the page and for every scrolling panel inside it. */
