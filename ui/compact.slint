@@ -1,0 +1,1211 @@
+// The Vigil window: the compact dashboard, drawn without a browser.
+//
+// This is the same layout as web/src/components/compact/ in the web
+// dashboard, written again for Slint: one tight column made to be read at
+// a glance. Sizes, colours and type are the web version's, so the two
+// look alike; where they differ it is noted. src/compact/ fills it in and
+// gives it a window to draw in.
+
+import "fonts/Montserrat-500.ttf";
+import "fonts/Montserrat-600.ttf";
+import "fonts/Montserrat-700.ttf";
+import "fonts/IBMPlexMono-400.ttf";
+import "fonts/IBMPlexMono-600.ttf";
+import "fonts/IBMPlexMono-700.ttf";
+import "fonts/Lato-300.ttf";
+
+import { Glyph, Icons } from "icons.slint";
+import { Logo } from "logo.slint";
+
+// ─── Colours ───────────────────────────────────────────────────────────
+// The compact dashboard's palette in each theme (CompactDashboard.vue).
+
+export global Theme {
+    in property <bool> dark: true;
+    out property <color> page: dark ? #0a0e17 : #e1e6ed;
+    out property <color> surface: dark ? #0f172a99 : #f0f3f8bd;
+    out property <color> border: dark ? #94a3b824 : #0f172a14;
+    out property <color> hair: dark ? #94a3b817 : #0f172a12;
+    out property <color> track: dark ? #94a3b824 : #0f172a17;
+    out property <color> text: dark ? #f1f5f9 : #1e293b;
+    out property <color> muted: dark ? #94a3b8 : #64748b;
+    out property <color> dim: dark ? #64748b : #8492a6;
+    out property <color> accent: dark ? #60a5fa : #2563eb;
+    out property <color> ok: dark ? #34d399 : #059669;
+    out property <color> warn: dark ? #fbbf24 : #d97706;
+    out property <color> crit: dark ? #f87171 : #dc2626;
+    // The accent of each card, its sparkline and its bar.
+    out property <color> blue: dark ? #60a5fa : #3b82f6;
+    out property <color> purple: dark ? #c084fc : #9a5cf0;
+    out property <color> amber: dark ? #fbbf24 : #d98a0b;
+    out property <color> green: dark ? #34d399 : #10a37a;
+    out property <color> cyan: dark ? #22d3ee : #0e9bb8;
+    out property <color> rose: dark ? #fb7185 : #e5486a;
+    out property <color> red: dark ? #f87171 : #e0484d;
+    // The title bar is dark in both themes, a shade lighter in the light one.
+    out property <color> bar-from: dark ? #111827 : #1c2638;
+    out property <color> bar-to: dark ? #1e293b : #2d3b51;
+    out property <color> scroll-thumb: dark ? #94a3b83d : #0f172a38;
+    out property <color> scroll-thumb-hover: dark ? #94a3b873 : #0f172a66;
+}
+
+global Type {
+    out property <string> mono: "IBM Plex Mono";
+    out property <string> mono-semibold: "IBM Plex Mono SemiBold";
+    out property <string> figures: "Lato Light";
+}
+
+// ─── What the window asks of the program ──────────────────────────────
+
+export global Host {
+    callback minimize();
+    callback close();
+    // Open the full dashboard, or Settings, in their own window.
+    callback open-full();
+    callback open-settings();
+    // Open a service's address in the browser.
+    callback open-url(string);
+    callback set-dark(bool);
+    callback set-live(bool);
+}
+
+// What is worked out in Rust rather than here. The sparklines
+// (src/compact/spark.rs), for the size each is drawn at: the line as an
+// outline, and the tint under it as a picture. `revision` changes with every reading, which is what has them
+// drawn again; `scale` is how many real pixels make one of these.
+export global Charts {
+    in property <int> revision;
+    in property <float> scale: 1;
+    pure callback line(/* series */ int, /* revision */ int, /* width */ length, /* height */ length) -> string;
+    pure callback tint(/* series */ int, /* revision */ int, /* width */ length, /* height */ length, /* scale */ float, color) -> image;
+    // The page behind the cards (src/compact/backdrop.rs), painted for
+    // the window's size and theme whenever either changes.
+    in property <image> page;
+}
+
+// ─── Small parts ──────────────────────────────────────────────────────
+
+component Icon inherits Path {
+    in property <Glyph> glyph;
+    in property <length> size: 12px;
+    width: self.size * self.glyph.w / 512;
+    height: self.size;
+    viewbox-width: self.glyph.w;
+    viewbox-height: 512;
+    commands: self.glyph.d;
+}
+
+// A soft round glow: `tint` at the centre, fading to nothing `radius`
+// away. (Slint measures a radial gradient to the corner of its box, hence
+// the 70.7%: the edge of a square is that far along.) Only for what is
+// seldom repainted, like the bar: see Backdrop.
+component Glow inherits Rectangle {
+    in property <length> cx;
+    in property <length> cy;
+    in property <length> radius;
+    in property <color> tint;
+    x: self.cx - self.radius;
+    y: self.cy - self.radius;
+    width: self.radius * 2;
+    height: self.radius * 2;
+    background: @radial-gradient(circle, self.tint 0%, self.tint.with-alpha(0) 70.7%);
+}
+
+// The page behind everything: the page colour with the web dashboard's
+// ambient glows in its accent tones. The glows are painted in Rust
+// (src/compact/backdrop.rs) and shown as one picture, because as
+// gradients here they would be worked out again for every pixel of every
+// repaint.
+component Backdrop inherits Rectangle {
+    background: Theme.page;
+    Image {
+        width: 100%;
+        height: 100%;
+        image-fit: fill;
+        source: Charts.page;
+    }
+}
+
+// A thin rounded track with a filled share, from 0 to 100.
+component Meter inherits Rectangle {
+    in property <float> share;
+    in property <color> tone;
+    border-radius: self.height / 2;
+    background: Theme.track;
+    Rectangle {
+        x: 0;
+        width: parent.width * clamp(root.share, 0, 100) / 100;
+        border-radius: parent.border-radius;
+        background: root.tone;
+    }
+}
+
+// The small square behind a card's or a panel's picture.
+component Tile inherits Rectangle {
+    in property <color> tint;
+    border-radius: self.width > 22px ? 7px : 6px;
+    background: self.tint.with-alpha(0.15);
+    border-width: 1px;
+    border-color: self.tint.with-alpha(0.25);
+}
+
+component PanelTitle inherits Text {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.99px;
+    color: Theme.text;
+    vertical-alignment: center;
+    overflow: elide;
+}
+
+// ─── A card ───────────────────────────────────────────────────────────
+// One row of the dashboard: what it is on the left, how it has been
+// lately in the middle, what it reads now on the right.
+
+component Card inherits Rectangle {
+    in property <string> title;
+    in property <Glyph> glyph;
+    // The Windows mark instead of a glyph, for the platform card.
+    in property <bool> windows-mark;
+    in property <color> tone;
+    in property <color> tint;
+    // The line under the title, in up to three differently coloured runs.
+    in property <string> sub;
+    in property <color> sub-color: Theme.muted;
+    in property <string> sub-2;
+    in property <color> sub-2-color: Theme.muted;
+    in property <string> sub-3;
+    in property <color> sub-3-color: Theme.muted;
+    // The reading and its unit; with none, the sparkline takes the room.
+    in property <string> value;
+    in property <string> unit;
+    // Or a small label over a value, as the platform card's uptime.
+    in property <string> aside-label;
+    in property <string> aside-value;
+    // A share from 0 to 100 drawn along the bottom, or none below zero.
+    in property <float> bar: -1;
+    // Which sparkline series to draw (see Charts), or none below zero.
+    in property <int> series: -1;
+    in property <color> series-color: self.tone;
+    in property <int> series-2: -1;
+    in property <color> series-2-color: self.tone;
+
+    property <length> inner: self.width - 22px;
+    property <bool> has-value: self.value != "";
+    property <bool> has-aside: self.aside-label != "";
+    property <bool> has-spark: self.series >= 0;
+    property <length> trailing: self.has-value ? max(62px, reading.preferred-width)
+        : self.has-aside ? max(aside-top.preferred-width, aside-bottom.preferred-width) : 0px;
+    property <length> trailing-gap: self.trailing > 0 ? 9px : 0px;
+    // Wider in a wider window, and the first thing to give way in a
+    // narrow one: the figures beside it matter more than its length.
+    property <length> spark-basis: self.has-value
+        ? clamp(self.inner * 26%, 96px, 320px) : clamp(self.inner * 42%, 170px, 480px);
+    property <length> text-wants: max(heading.preferred-width, subline.preferred-width);
+    property <length> spark-width: !self.has-spark ? 0px
+        : clamp(self.inner - 35px - self.text-wants - 9px - self.trailing - self.trailing-gap, 44px, self.spark-basis);
+    property <length> text-width: max(0px, self.inner - 35px - self.trailing - self.trailing-gap
+        - (self.has-spark ? self.spark-width + 9px : 0px));
+
+    height: self.bar >= 0 ? 55px : 46px;
+    border-radius: 9px;
+    background: Theme.surface;
+    border-width: 1px;
+    border-color: Theme.border;
+
+    Tile {
+        x: 11px;
+        y: 10px;
+        width: 26px;
+        height: 26px;
+        tint: root.tint;
+        if !root.windows-mark: Icon {
+            glyph: root.glyph;
+            size: 12px;
+            fill: root.tone;
+        }
+        // The four panes of web/public/images/windows.png.
+        if root.windows-mark: Rectangle {
+            width: 15px;
+            height: 15px;
+            Path {
+                viewbox-width: 291;
+                viewbox-height: 291;
+                commands: "M0 43L118 25L118 135L0 135Z";
+                fill: #e2574c;
+            }
+            Path {
+                viewbox-width: 291;
+                viewbox-height: 291;
+                commands: "M136 22L291 0L291 135L136 135Z";
+                fill: #3db39e;
+            }
+            Path {
+                viewbox-width: 291;
+                viewbox-height: 291;
+                commands: "M0 154L118 154L118 266L0 248Z";
+                fill: #26a6d1;
+            }
+            Path {
+                viewbox-width: 291;
+                viewbox-height: 291;
+                commands: "M136 154L291 154L291 291L136 269Z";
+                fill: #f4b459;
+            }
+        }
+    }
+
+    Rectangle {
+        x: 46px;
+        y: 8px;
+        width: root.text-width;
+        height: 30px;
+        clip: true;
+        heading := Text {
+            x: 0;
+            y: 2px;
+            width: min(parent.width, self.preferred-width);
+            text: root.title;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.99px;
+            color: Theme.text;
+            overflow: elide;
+        }
+        subline := HorizontalLayout {
+            x: 0;
+            y: 16px;
+            width: min(parent.width, self.preferred-width);
+            height: 13px;
+            Text {
+                text: root.sub;
+                font-family: Type.mono;
+                font-size: 10.5px;
+                color: root.sub-color;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+            Text {
+                text: root.sub-2;
+                font-family: Type.mono;
+                font-size: 10.5px;
+                color: root.sub-2-color;
+                vertical-alignment: center;
+            }
+            Text {
+                text: root.sub-3;
+                font-family: Type.mono;
+                font-size: 10.5px;
+                color: root.sub-3-color;
+                vertical-alignment: center;
+            }
+        }
+    }
+
+    if root.has-spark: Rectangle {
+        x: 46px + root.text-width + 9px;
+        y: 10px;
+        width: root.spark-width;
+        height: 26px;
+        // The second series is drawn first, so the first lies over it.
+        if root.series-2 >= 0: Image {
+            width: parent.width;
+            height: parent.height;
+            image-fit: fill;
+            source: Charts.tint(root.series-2, Charts.revision, parent.width, parent.height, Charts.scale, root.series-2-color);
+        }
+        if root.series-2 >= 0: Path {
+            viewbox-width: parent.width / 1px;
+            viewbox-height: parent.height / 1px;
+            commands: Charts.line(root.series-2, Charts.revision, parent.width, parent.height);
+            stroke: root.series-2-color;
+            stroke-width: 1.5px;
+        }
+        Image {
+            width: parent.width;
+            height: parent.height;
+            image-fit: fill;
+            source: Charts.tint(root.series, Charts.revision, parent.width, parent.height, Charts.scale, root.series-color);
+        }
+        Path {
+            viewbox-width: parent.width / 1px;
+            viewbox-height: parent.height / 1px;
+            commands: Charts.line(root.series, Charts.revision, parent.width, parent.height);
+            stroke: root.series-color;
+            stroke-width: 1.5px;
+        }
+    }
+
+    // The reading: a light figure with its unit small beside it, both on
+    // one baseline.
+    reading := HorizontalLayout {
+        visible: root.has-value;
+        x: root.width - 11px - self.width;
+        y: 8px;
+        width: self.preferred-width;
+        height: 30px;
+        spacing: 3px;
+        Text {
+            text: root.value;
+            font-family: Type.figures;
+            font-size: 19px;
+            letter-spacing: -0.19px;
+            color: Theme.text;
+            vertical-alignment: center;
+        }
+        VerticalLayout {
+            alignment: center;
+            padding-top: 5px;
+            Text {
+                text: root.unit;
+                font-size: 10px;
+                font-weight: 500;
+                color: Theme.muted;
+            }
+        }
+    }
+
+    aside-top := Text {
+        visible: root.has-aside;
+        x: root.width - 11px - self.width;
+        y: 10px;
+        width: self.preferred-width;
+        text: root.aside-label;
+        font-family: Type.mono-semibold;
+        font-size: 9.5px;
+        letter-spacing: 1.14px;
+        color: Theme.dim;
+    }
+    aside-bottom := Text {
+        visible: root.has-aside;
+        x: root.width - 11px - self.width;
+        y: 23px;
+        width: self.preferred-width;
+        text: root.aside-value;
+        font-family: Type.mono;
+        font-size: 11px;
+        color: Theme.text;
+    }
+
+    if root.bar >= 0: Meter {
+        x: 11px;
+        y: 44px;
+        width: root.width - 22px;
+        height: 3px;
+        share: root.bar;
+        tone: root.tone;
+    }
+}
+
+// ─── Services ─────────────────────────────────────────────────────────
+// The service checks in one line while all is well. Any check that isn't
+// well is listed under it, and a press on the line lists them all.
+
+export struct ServiceRow {
+    name: string,
+    url: string,
+    // 0 checking, 1 online, 2 slow, 3 offline.
+    status: int,
+    // The HTTP status, or empty.
+    code: string,
+    // The latency in milliseconds, or what went wrong when offline.
+    detail: string,
+}
+
+component Services inherits Rectangle {
+    in property <[ServiceRow]> rows;
+    // 0 checking, 1 all well, 2 some slow, 3 some or all down.
+    in property <int> overall;
+    in property <string> overall-label;
+    property <bool> open;
+    property <color> pill: self.overall == 1 ? Theme.ok : self.overall == 2 ? Theme.warn : self.overall == 3 ? Theme.crit : Theme.muted;
+
+    border-radius: 9px;
+    background: Theme.surface;
+    border-width: 1px;
+    border-color: Theme.border;
+
+    VerticalLayout {
+        padding: 1px;
+        Rectangle {
+            height: 32px;
+            head := TouchArea {
+                clicked => {
+                    root.open = !root.open;
+                }
+            }
+            HorizontalLayout {
+                padding-left: 10px;
+                padding-right: 10px;
+                spacing: 9px;
+                VerticalLayout {
+                    alignment: center;
+                    Tile {
+                        width: 20px;
+                        height: 20px;
+                        tint: #ef4444;
+                        Icon {
+                            glyph: Icons.heart-pulse;
+                            size: 10px;
+                            fill: Theme.red;
+                        }
+                    }
+                }
+                PanelTitle {
+                    text: "SERVICES";
+                }
+                Text {
+                    text: root.rows.length;
+                    font-family: Type.mono;
+                    font-size: 10px;
+                    color: Theme.muted;
+                    vertical-alignment: center;
+                }
+                Rectangle {
+                    horizontal-stretch: 1;
+                }
+                VerticalLayout {
+                    alignment: center;
+                    Rectangle {
+                        width: verdict.preferred-width;
+                        height: 18px;
+                        border-radius: 9px;
+                        background: root.pill.with-alpha(0.12);
+                        border-width: 1px;
+                        border-color: root.pill.with-alpha(0.3);
+                        verdict := HorizontalLayout {
+                            padding-left: 7px;
+                            padding-right: 7px;
+                            spacing: 5px;
+                            VerticalLayout {
+                                alignment: center;
+                                Rectangle {
+                                    width: 6px;
+                                    height: 6px;
+                                    border-radius: 3px;
+                                    background: root.pill;
+                                }
+                            }
+                            Text {
+                                text: root.overall-label;
+                                font-family: Type.mono;
+                                font-weight: 700;
+                                font-size: 9px;
+                                letter-spacing: 0.9px;
+                                color: root.pill;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    Icon {
+                        glyph: root.open ? Icons.arrow-up : Icons.arrow-down;
+                        size: 9px;
+                        fill: head.has-hover ? Theme.muted : Theme.dim;
+                    }
+                }
+            }
+        }
+        for row in root.rows: Rectangle {
+            property <bool> shown: root.open || row.status >= 2;
+            property <color> dot: row.status == 1 ? Theme.ok : row.status == 2 ? Theme.warn : row.status == 3 ? Theme.crit : Theme.muted;
+            height: self.shown ? 22px : 0px;
+            visible: self.shown;
+            Rectangle {
+                y: 0;
+                height: 1px;
+                background: Theme.hair;
+            }
+            HorizontalLayout {
+                padding-left: 10px;
+                padding-right: 10px;
+                spacing: 8px;
+                VerticalLayout {
+                    alignment: center;
+                    Rectangle {
+                        width: 7px;
+                        height: 7px;
+                        border-radius: 3.5px;
+                        background: dot;
+                    }
+                }
+                link := TouchArea {
+                    horizontal-stretch: 1;
+                    min-width: 0;
+                    clicked => {
+                        Host.open-url(row.url);
+                    }
+                    Text {
+                        x: 0;
+                        width: parent.width;
+                        text: row.name;
+                        font-size: 11px;
+                        font-weight: 600;
+                        color: link.has-hover ? Theme.accent : Theme.text;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                }
+                if row.code != "": VerticalLayout {
+                    alignment: center;
+                    Rectangle {
+                        height: 14px;
+                        border-radius: 4px;
+                        background: Theme.track;
+                        HorizontalLayout {
+                            padding-left: 5px;
+                            padding-right: 5px;
+                            Text {
+                                text: row.code;
+                                font-family: Type.mono;
+                                font-size: 9.5px;
+                                color: Theme.muted;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+                if row.status == 3: Text {
+                    max-width: root.width * 55%;
+                    text: row.detail;
+                    font-family: Type.mono;
+                    font-size: 11px;
+                    color: Theme.crit;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+                if row.status != 3: HorizontalLayout {
+                    spacing: 2px;
+                    Text {
+                        text: row.status == 0 ? "–" : row.detail;
+                        font-family: Type.mono;
+                        font-size: 11px;
+                        color: Theme.text;
+                        vertical-alignment: center;
+                    }
+                    if row.status != 0: VerticalLayout {
+                        alignment: center;
+                        padding-top: 1px;
+                        Text {
+                            text: "ms";
+                            font-family: Type.mono;
+                            font-size: 9.5px;
+                            color: Theme.muted;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ─── Top processes ────────────────────────────────────────────────────
+// The busiest programs, by processor or by memory, one line each.
+
+export struct ProcessRow {
+    name: string,
+    // The length of its bar, from 0 to 100: its share of the busiest.
+    share: float,
+    cpu: string,
+    mem: string,
+    mem-unit: string,
+}
+
+component SortHeading inherits Rectangle {
+    in property <string> label;
+    in property <bool> active;
+    callback chosen();
+    area := TouchArea {
+        clicked => {
+            root.chosen();
+        }
+    }
+    Text {
+        x: 0;
+        width: parent.width - 10px;
+        text: root.active ? root.label + " ↓" : root.label;
+        font-family: Type.mono-semibold;
+        font-size: 9.5px;
+        letter-spacing: 1.14px;
+        color: root.active ? Theme.accent : area.has-hover ? Theme.text : Theme.dim;
+        horizontal-alignment: right;
+        vertical-alignment: center;
+    }
+}
+
+component Processes inherits Rectangle {
+    in property <[ProcessRow]> by-cpu;
+    in property <[ProcessRow]> by-memory;
+    property <bool> sort-by-cpu: true;
+    property <bool> show-all;
+    // How many lines to show until asked for them all.
+    property <int> few: 5;
+    property <[ProcessRow]> listed: self.sort-by-cpu && self.by-cpu.length > 0 ? self.by-cpu : self.by-memory;
+
+    border-radius: 9px;
+    background: Theme.surface;
+    border-width: 1px;
+    border-color: Theme.border;
+
+    VerticalLayout {
+        padding: 1px;
+        padding-bottom: 2px;
+        HorizontalLayout {
+            height: 32px;
+            padding-left: 10px;
+            padding-right: 10px;
+            spacing: 9px;
+            VerticalLayout {
+                alignment: center;
+                Tile {
+                    width: 20px;
+                    height: 20px;
+                    tint: #10b981;
+                    Icon {
+                        glyph: Icons.list-ul;
+                        size: 10px;
+                        fill: Theme.green;
+                    }
+                }
+            }
+            PanelTitle {
+                text: "TOP PROCESSES";
+            }
+            Rectangle {
+                horizontal-stretch: 1;
+            }
+            if root.listed.length > root.few: more := TouchArea {
+                width: more-words.preferred-width;
+                clicked => {
+                    root.show-all = !root.show-all;
+                }
+                more-words := HorizontalLayout {
+                    spacing: 5px;
+                    Text {
+                        text: root.show-all ? "Show fewer" : "View all";
+                        font-size: 10.5px;
+                        font-weight: 600;
+                        color: Theme.accent;
+                        vertical-alignment: center;
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        Icon {
+                            glyph: root.show-all ? Icons.arrow-up : Icons.arrow-down;
+                            size: 9px;
+                            fill: Theme.accent;
+                        }
+                    }
+                }
+                Rectangle {
+                    y: parent.height / 2 + 7px;
+                    height: 1px;
+                    background: more.has-hover ? Theme.accent : transparent;
+                }
+            }
+        }
+        Rectangle {
+            height: 22px;
+            Text {
+                x: 10px;
+                text: "NAME";
+                font-family: Type.mono-semibold;
+                font-size: 9.5px;
+                letter-spacing: 1.14px;
+                color: Theme.dim;
+                vertical-alignment: center;
+            }
+            SortHeading {
+                x: parent.width - 78px - 52px;
+                width: 52px;
+                label: "CPU";
+                active: root.sort-by-cpu;
+                chosen => {
+                    root.sort-by-cpu = true;
+                }
+            }
+            SortHeading {
+                x: parent.width - 78px;
+                width: 78px;
+                label: "MEMORY";
+                active: !root.sort-by-cpu;
+                chosen => {
+                    root.sort-by-cpu = false;
+                }
+            }
+        }
+        for row[index] in root.listed: Rectangle {
+            property <bool> shown: root.show-all || index < root.few;
+            property <length> name-width: (self.width * 36%) - 10px;
+            height: self.shown ? 22px : 0px;
+            visible: self.shown;
+            Rectangle {
+                y: 0;
+                height: 1px;
+                background: Theme.hair;
+            }
+            Text {
+                x: 10px;
+                width: parent.name-width;
+                text: row.name;
+                font-size: 11px;
+                font-weight: 600;
+                letter-spacing: 0.44px;
+                color: Theme.text;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+            Meter {
+                x: 10px + parent.name-width + 10px;
+                y: 9px;
+                width: max(0px, parent.width - self.x - 10px - 52px - 78px);
+                height: 4px;
+                share: row.share;
+                tone: Theme.green;
+            }
+            HorizontalLayout {
+                x: parent.width - 78px - 52px;
+                width: 42px;
+                alignment: end;
+                spacing: 3px;
+                Text {
+                    text: row.cpu;
+                    font-family: Type.mono;
+                    font-size: 11px;
+                    color: Theme.text;
+                    vertical-alignment: center;
+                }
+                VerticalLayout {
+                    alignment: center;
+                    padding-top: 1px;
+                    Text {
+                        text: "%";
+                        font-family: Type.mono;
+                        font-size: 9.5px;
+                        color: Theme.muted;
+                    }
+                }
+            }
+            HorizontalLayout {
+                x: parent.width - 78px;
+                width: 68px;
+                alignment: end;
+                spacing: 3px;
+                Text {
+                    text: row.mem;
+                    font-family: Type.mono;
+                    font-size: 11px;
+                    color: Theme.text;
+                    vertical-alignment: center;
+                }
+                VerticalLayout {
+                    alignment: center;
+                    padding-top: 1px;
+                    Text {
+                        min-width: 21px;
+                        text: row.mem-unit;
+                        font-family: Type.mono;
+                        font-size: 9.5px;
+                        color: Theme.muted;
+                    }
+                }
+            }
+        }
+        if root.listed.length == 0: Rectangle {
+            height: 22px;
+            Rectangle {
+                y: 0;
+                height: 1px;
+                background: Theme.hair;
+            }
+            Text {
+                x: 10px;
+                text: "Waiting for the first scan…";
+                font-size: 11px;
+                color: Theme.muted;
+                vertical-alignment: center;
+            }
+        }
+    }
+}
+
+// ─── The title bar ────────────────────────────────────────────────────
+// The window has no title bar of its own; this is it. Pressing an empty
+// part of it moves the window, which the program arranges with Windows
+// itself (see `caption-until` below and src/compact/host.rs).
+
+// A round-ended switch with a picture at each end and a thumb that slides
+// under one of them.
+component Switch inherits Rectangle {
+    in property <bool> on;
+    in property <Glyph> left;
+    in property <Glyph> right;
+    callback toggled();
+    width: 40px;
+    height: 20px;
+    border-radius: 10px;
+    background: area.has-hover ? #ffffff1a : #ffffff0f;
+    border-width: 1px;
+    border-color: area.has-hover ? #ffffff2e : #ffffff1a;
+    area := TouchArea {
+        clicked => {
+            root.toggled();
+        }
+    }
+    Rectangle {
+        x: root.on ? 23px : 3px;
+        y: 3px;
+        width: 14px;
+        height: 14px;
+        border-radius: 7px;
+        background: #f9fafb;
+        animate x {
+            duration: 250ms;
+            easing: cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+    }
+    Icon {
+        x: 10px - self.width / 2;
+        glyph: root.left;
+        size: 8px;
+        fill: root.on ? #6b7280 : #fbbf24;
+    }
+    Icon {
+        x: 30px - self.width / 2;
+        glyph: root.right;
+        size: 8px;
+        fill: root.on ? #c084fc : #94a3b8;
+    }
+}
+
+component WindowButton inherits Rectangle {
+    in property <bool> closes;
+    callback pressed-it();
+    width: 40px;
+    background: area.pressed ? (root.closes ? #b3271a : #ffffff29)
+        : area.has-hover ? (root.closes ? #c42b1c : #ffffff1a) : transparent;
+    out property <color> ink: area.has-hover ? #ffffff : #cbd5e1;
+    area := TouchArea {
+        clicked => {
+            root.pressed-it();
+        }
+    }
+    @children
+}
+
+component TitleBar inherits Rectangle {
+    in property <bool> live;
+    // Everything left of this is bare bar, which moves the window.
+    out property <length> caption-until: controls.x;
+
+    // A 32px row and the line under it.
+    height: 33px;
+    background: @linear-gradient(135deg, Theme.bar-from 0%, Theme.bar-to 100%);
+    clip: true;
+
+    Glow { cx: 0; cy: 0; radius: 350px; tint: #3b82f629; }
+    Glow { cx: root.width; cy: root.height; radius: 250px; tint: #22d3ee1a; }
+    Rectangle {
+        y: parent.height - 1px;
+        height: 1px;
+        background: #60a5fa38;
+    }
+
+    // The glow the web version's mark casts.
+    Glow { cx: 20px; cy: 18px; radius: 16px; tint: #22d3ee38; }
+    Logo {
+        x: 10px;
+        y: 6px;
+        width: 20px;
+        height: 20px;
+    }
+
+    controls := HorizontalLayout {
+        x: root.width - 126px - self.width;
+        y: 0;
+        width: self.preferred-width;
+        height: 32px;
+        spacing: 6px;
+        // Live or static, and the dot says it alone in a narrow window.
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                property <color> ink: root.live ? #34d399 : #fbbf24;
+                height: 19px;
+                border-radius: 6px;
+                background: #ffffff0a;
+                border-width: 1px;
+                border-color: #ffffff14;
+                HorizontalLayout {
+                    padding-left: 7px;
+                    padding-right: 7px;
+                    spacing: 6px;
+                    VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            width: 6px;
+                            height: 6px;
+                            border-radius: 3px;
+                            background: ink;
+                        }
+                    }
+                    if root.width >= 380px: Text {
+                        text: root.live ? "LIVE" : "STATIC";
+                        font-family: Type.mono;
+                        font-weight: 700;
+                        font-size: 9px;
+                        letter-spacing: 1.44px;
+                        color: ink;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 26px;
+                height: 20px;
+                border-radius: 10px;
+                background: gear.has-hover ? #ffffff1a : #ffffff0f;
+                border-width: 1px;
+                border-color: gear.has-hover ? #ffffff2e : #ffffff1a;
+                gear := TouchArea {
+                    clicked => {
+                        Host.open-settings();
+                    }
+                }
+                Icon {
+                    glyph: Icons.gear;
+                    size: 10px;
+                    fill: gear.has-hover ? #ffffff : #cbd5e1;
+                }
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            Switch {
+                on: Theme.dark;
+                left: Icons.sun;
+                right: Icons.moon;
+                toggled => {
+                    Host.set-dark(!Theme.dark);
+                }
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            Switch {
+                on: root.live;
+                left: Icons.bolt;
+                right: Icons.pause;
+                toggled => {
+                    Host.set-live(!root.live);
+                }
+            }
+        }
+    }
+
+    HorizontalLayout {
+        x: root.width - self.width;
+        y: 0;
+        width: 120px;
+        height: 32px;
+        minimise := WindowButton {
+            pressed-it => {
+                Host.minimize();
+            }
+            Path {
+                width: 10px;
+                height: 10px;
+                viewbox-width: 10;
+                viewbox-height: 10;
+                commands: "M0 5.5L10 5.5";
+                stroke: minimise.ink;
+                stroke-width: 1px;
+            }
+        }
+        // Where other windows have Maximise, this one opens the full
+        // dashboard, which has a window of its own.
+        full := WindowButton {
+            pressed-it => {
+                Host.open-full();
+            }
+            Icon {
+                glyph: Icons.expand;
+                size: 10px;
+                fill: full.ink;
+            }
+        }
+        close := WindowButton {
+            closes: true;
+            pressed-it => {
+                Host.close();
+            }
+            Path {
+                width: 10px;
+                height: 10px;
+                viewbox-width: 10;
+                viewbox-height: 10;
+                commands: "M0.5 0.5L9.5 9.5M9.5 0.5L0.5 9.5";
+                stroke: close.ink;
+                stroke-width: 1px;
+            }
+        }
+    }
+}
+
+// ─── The window ───────────────────────────────────────────────────────
+
+export component CompactWindow inherits Window {
+    in property <bool> live: true;
+
+    in property <bool> platform-is-windows;
+    in property <string> platform-name: "PLATFORM";
+    in property <string> kernel: "–";
+    in property <string> uptime: "–";
+
+    in property <string> cpu-value: "–";
+    in property <string> cpu-detail;
+    // The temperature, with its separator, when there is a sensor.
+    in property <string> cpu-temperature;
+    in property <color> cpu-temperature-color;
+
+    in property <string> memory-value: "–";
+    in property <string> memory-detail;
+    in property <float> memory-share;
+
+    in property <string> disk-value: "–";
+    in property <string> disk-detail;
+    in property <float> disk-share;
+
+    in property <string> network-down;
+    in property <string> network-up;
+
+    in property <[ServiceRow]> services;
+    in property <int> services-overall;
+    in property <string> services-label;
+
+    in property <[ProcessRow]> processes-by-cpu;
+    in property <[ProcessRow]> processes-by-memory;
+
+    // For the program's own hit testing: the bar's height, and how far
+    // from the left it is bare (see TitleBar).
+    out property <length> bar-height: bar.height;
+    out property <length> caption-until: bar.caption-until;
+
+    title: "Vigil";
+    preferred-width: 420px;
+    preferred-height: 580px;
+    min-width: 360px;
+    min-height: 300px;
+    background: Theme.page;
+    default-font-family: "Montserrat";
+    default-font-size: 11px;
+
+    Backdrop { }
+
+    bar := TitleBar {
+        y: 0;
+        live: root.live;
+    }
+
+    scroller := Flickable {
+        y: bar.height;
+        height: root.height - bar.height;
+        interactive: false;
+        content-width: self.width;
+        content-height: max(self.height, column.preferred-height);
+        column := VerticalLayout {
+            width: scroller.width;
+            padding: 8px;
+            spacing: 6px;
+            alignment: start;
+            Card {
+                title: root.platform-name;
+                windows-mark: root.platform-is-windows;
+                glyph: Icons.server;
+                tone: Theme.blue;
+                tint: #3b82f6;
+                sub: "Kernel ";
+                sub-color: Theme.dim;
+                sub-2: root.kernel;
+                aside-label: "UPTIME";
+                aside-value: root.uptime;
+            }
+            Card {
+                title: "CPU";
+                glyph: Icons.microchip;
+                tone: Theme.purple;
+                tint: #a855f7;
+                value: root.cpu-value;
+                unit: "%";
+                sub: root.cpu-detail;
+                sub-2: root.cpu-temperature != "" ? " · " : "";
+                sub-3: root.cpu-temperature;
+                sub-3-color: root.cpu-temperature-color;
+                series: 0;
+            }
+            Card {
+                title: "MEMORY";
+                glyph: Icons.memory;
+                tone: Theme.amber;
+                tint: #f59e0b;
+                value: root.memory-value;
+                unit: "%";
+                sub: root.memory-detail;
+                bar: root.memory-share;
+                series: 1;
+            }
+            Card {
+                title: "DISK";
+                glyph: Icons.hard-drive;
+                tone: Theme.green;
+                tint: #10b981;
+                value: root.disk-value;
+                unit: "%";
+                sub: root.disk-detail;
+                bar: root.disk-share;
+                series: 2;
+            }
+            Card {
+                title: "NETWORK";
+                glyph: Icons.tower-broadcast;
+                tone: Theme.cyan;
+                tint: #22d3ee;
+                sub: root.network-down;
+                sub-color: Theme.cyan;
+                sub-2: " · ";
+                sub-3: root.network-up;
+                sub-3-color: Theme.rose;
+                // Sent is drawn first and received over it, as on the web.
+                series: 4;
+                series-color: Theme.cyan;
+                series-2: 3;
+                series-2-color: Theme.rose;
+            }
+            if root.services.length > 0: Services {
+                rows: root.services;
+                overall: root.services-overall;
+                overall-label: root.services-label;
+            }
+            Processes {
+                by-cpu: root.processes-by-cpu;
+                by-memory: root.processes-by-memory;
+            }
+        }
+    }
+
+    // A slim scrollbar, shown only when there is something to scroll.
+    if scroller.content-height > scroller.height: Rectangle {
+        property <length> travel: scroller.height - self.height - 4px;
+        x: root.width - 6px;
+        y: bar.height + 2px + self.travel * (-scroller.content-y / (scroller.content-height - scroller.height));
+        width: 4px;
+        height: max(40px, scroller.height * scroller.height / scroller.content-height);
+        border-radius: 2px;
+        background: Theme.scroll-thumb;
+    }
+}

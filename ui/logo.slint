@@ -1,0 +1,35 @@
+// The Vigil mark, as web/src/components/SiteLogo.vue draws it: a V whose
+// left arm is one smooth prism and whose right arm is three stacked
+// blocks, the top one twisted, meeting on a cyan block at the point.
+// Painted back to front. The fine white edge lines of the web version are
+// left out: at title-bar size they are a fifth of a pixel wide.
+
+component Face inherits Path {
+    viewbox-x: 12;
+    viewbox-y: 12;
+    viewbox-width: 40;
+    viewbox-height: 40;
+}
+
+export component Logo inherits Rectangle {
+    // Smooth left arm.
+    Face { commands: "M21.5 14.5L32 35.5L32 42.5L21.5 21.5Z"; fill: @linear-gradient(160deg, #164e63 0%, #0c4a6e 100%); }
+    Face { commands: "M15.44 18L25.94 39L25.94 46L15.44 25Z"; fill: @linear-gradient(162deg, #22d3ee 0%, #0e7490 55%, #075985 100%); }
+    Face { commands: "M15.44 18L21.5 14.5L32 35.5L25.94 39Z"; fill: @linear-gradient(151deg, #a5f3fc 0%, #22d3ee 45%, #34d399 100%); }
+    // Top right block, twisted.
+    Face { commands: "M37.01 15.44L41.02 21.17L42.5 28.5L36.44 25Z"; fill: @linear-gradient(180deg, #d946ef 0%, #a21caf 100%); }
+    Face { commands: "M47.99 20.56L41.02 21.17L42.5 28.5L48.56 25Z"; fill: @linear-gradient(180deg, #86198f 0%, #4a044e 100%); }
+    Face { commands: "M43.98 14.83L47.99 20.56L41.02 21.17L37.01 15.44Z"; fill: @linear-gradient(135deg, #fbbf24 0%, #d946ef 100%); }
+    // Middle right block.
+    Face { commands: "M32.94 25L39 28.5L39 35.5L32.94 32Z"; fill: @linear-gradient(180deg, #c084fc 0%, #a855f7 100%); }
+    Face { commands: "M45.06 25L39 28.5L39 35.5L45.06 32Z"; fill: @linear-gradient(180deg, #7e22ce 0%, #581c87 100%); }
+    Face { commands: "M39 21.5L45.06 25L39 28.5L32.94 25Z"; fill: @linear-gradient(180deg, #e9d5ff 0%, #c084fc 100%); }
+    // Lower right block.
+    Face { commands: "M29.44 32L35.5 35.5L35.5 42.5L29.44 39Z"; fill: @linear-gradient(180deg, #60a5fa 0%, #3b82f6 100%); }
+    Face { commands: "M41.56 32L35.5 35.5L35.5 42.5L41.56 39Z"; fill: @linear-gradient(180deg, #1e40af 0%, #1e3a8a 100%); }
+    Face { commands: "M35.5 28.5L41.56 32L35.5 35.5L29.44 32Z"; fill: @linear-gradient(180deg, #93c5fd 0%, #60a5fa 100%); }
+    // The point, in front.
+    Face { commands: "M25.94 39L32 42.5L32 49.5L25.94 46Z"; fill: @linear-gradient(180deg, #22d3ee 0%, #0891b2 100%); }
+    Face { commands: "M38.06 39L32 42.5L32 49.5L38.06 46Z"; fill: @linear-gradient(180deg, #0e7490 0%, #075985 100%); }
+    Face { commands: "M32 35.5L38.06 39L32 42.5L25.94 39Z"; fill: @linear-gradient(180deg, #67e8f9 0%, #22d3ee 100%); }
+}

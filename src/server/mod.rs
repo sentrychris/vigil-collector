@@ -175,6 +175,15 @@ pub struct Serve {
     pub control: Option<control::Control>,
 }
 
+/// A client for the service checks, to be kept and used again. The
+/// timeout is set per request by ``probes::run`` (re-read from settings
+/// each call), which overrides any client-level timeout in reqwest.
+pub fn probes_client() -> reqwest::Result<reqwest::Client> {
+    reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::limited(10))
+        .build()
+}
+
 /// Serves on ``listener`` (from ``bind``) until ``shutdown`` resolves.
 pub async fn serve<F>(
     listener: tokio::net::TcpListener,
@@ -185,12 +194,8 @@ where
     F: std::future::Future<Output = ()> + Send + 'static,
 {
     let workers = Arc::new(WorkerRegistry::new());
-    // One pooled client for the life of the server. The timeout is set per
-    // request by ``probes::run`` (re-read from settings each call), which
-    // overrides any client-level timeout in reqwest.
-    let probes_client = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::limited(10))
-        .build()?;
+    // One pooled client for the life of the server.
+    let probes_client = probes_client()?;
 
     let (closing_tx, closing) = watch::channel(false);
     let active_ws = serve.active_ws.clone();

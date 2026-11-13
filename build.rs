@@ -1,6 +1,11 @@
-//! Builds the Vue dashboard in ``web/`` so the binary can embed it.
+//! Builds the two things the binary embeds: the Vue dashboard in ``web/``,
+//! and the compact window's layout in ``ui/``.
 //!
-//! Cargo reruns this only when a dashboard source file changes, and Vite
+//! The layout is written in Slint's own language (``ui/compact.slint``).
+//! Slint's compiler turns it into Rust here, with the fonts it names built
+//! in, and ``src/compact/mod.rs`` includes the result.
+//!
+//! For the dashboard, Cargo reruns this only when a source file changes, and Vite
 //! writes the result to ``web/dist``, which ``src/server/http.rs`` embeds.
 //! It needs Node.js 18+ with npm on ``PATH``. Set ``VIGIL_SKIP_WEB_BUILD=1``
 //! to use an existing ``web/dist`` as-is (for example one built in an
@@ -25,6 +30,8 @@ const WATCH: &[&str] = &[
 ];
 
 fn main() {
+    compact_window();
+
     for path in WATCH {
         println!("cargo:rerun-if-changed={path}");
     }
@@ -56,6 +63,19 @@ fn main() {
 
     if !dist_index.exists() {
         fail("the dashboard build finished but web/dist/index.html is missing.");
+    }
+}
+
+/// Turns the compact window's layout (``ui/compact.slint``) into Rust for
+/// ``src/compact/`` to include, with its fonts built into the program.
+/// Done for every target, though only Windows has the window: the tests
+/// draw it on all of them.
+fn compact_window() {
+    let config = slint_build::CompilerConfiguration::new()
+        .embed_resources(slint_build::EmbedResourcesKind::EmbedFiles);
+    if let Err(e) = slint_build::compile_with_config("ui/compact.slint", config) {
+        eprintln!("\nerror: building the compact window: {e}\n");
+        std::process::exit(1);
     }
 }
 

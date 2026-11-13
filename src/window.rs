@@ -1,9 +1,11 @@
-//! The Vigil window: the dashboard as a desktop program.
+//! The window for the full dashboard and the Settings page.
 //!
 //! One window with a WebView2 control filling it, showing the same
 //! dashboard a browser would. It loads from the tray process's private
 //! listener (see ``server::control``), which is also the only place the
-//! Settings page is served.
+//! Settings page is served. The window the tray icon opens is a different
+//! one, the compact dashboard, which is drawn without a browser
+//! (``compact/``) and has a button that opens this one.
 //!
 //! The window has no title bar of its own. The dashboard's top bar takes
 //! its place: it draws the minimise, maximise and close buttons and is
@@ -29,38 +31,32 @@
 use std::cell::{Cell, RefCell};
 use std::num::NonZeroIsize;
 
-use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
+use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::{BLACK_BRUSH, GetStockObject};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows_sys::Win32::UI::HiDpi::{GetDpiForWindow, GetSystemMetricsForDpi};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CW_USEDEFAULT, CreateWindowExW, DefWindowProcW, DestroyIcon, DestroyWindow, GetCursorPos,
-    GetSystemMetrics, GetWindowPlacement, HICON, HTCAPTION, HTTOP, HTTOPLEFT, HTTOPRIGHT, ICON_BIG,
-    ICON_SMALL, IDC_ARROW, IsIconic, IsZoomed, LoadCursorW, MINMAXINFO, PostMessageW,
-    RegisterClassW, SIZE_MAXIMIZED, SIZE_MINIMIZED, SIZE_RESTORED, SM_CXICON, SM_CXPADDEDBORDER,
-    SM_CXSMICON, SM_CYSIZEFRAME, SPI_GETWORKAREA, SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE,
-    SW_SHOW, SW_SHOWMAXIMIZED, SW_SHOWMINIMIZED, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE,
-    SWP_NOSIZE, SWP_NOZORDER, SendMessageW, SetForegroundWindow, SetWindowPlacement, SetWindowPos,
-    ShowWindow, SystemParametersInfoW, WINDOWPLACEMENT, WM_APP, WM_CLOSE, WM_DPICHANGED,
-    WM_GETMINMAXINFO, WM_NCCALCSIZE, WM_NCLBUTTONDOWN, WM_SETICON, WM_SIZE, WNDCLASSW,
-    WPF_RESTORETOMAXIMIZED, WS_OVERLAPPEDWINDOW,
+    CW_USEDEFAULT, CreateWindowExW, DefWindowProcW, DestroyWindow, GetCursorPos, HICON, HTCAPTION,
+    HTTOP, HTTOPLEFT, HTTOPRIGHT, IDC_ARROW, IsZoomed, LoadCursorW, PostMessageW, RegisterClassW,
+    SIZE_MAXIMIZED, SIZE_MINIMIZED, SIZE_RESTORED, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE,
+    ShowWindow, WM_APP, WM_CLOSE, WM_DPICHANGED, WM_GETMINMAXINFO, WM_NCCALCSIZE, WM_NCLBUTTONDOWN,
+    WM_SIZE, WNDCLASSW, WS_OVERLAPPEDWINDOW,
 };
 use wry::raw_window_handle::{
     HandleError, HasWindowHandle, RawWindowHandle, Win32WindowHandle, WindowHandle,
 };
 use wry::{NewWindowResponse, WebContext, WebView, WebViewBuilder};
 
-use crate::config::{self, WindowPlace};
-use crate::tray::{load_icon, open_external, wide};
+use crate::config::{self, WindowKind};
+use crate::frame;
+use crate::tray::{open_external, wide};
 
 const CLASS_NAME: &str = "VigilWindow";
 /// The window's first size and its smallest, in pixels at 100% scaling.
-/// It opens as a small monitor for a corner of the screen: the size at
-/// which the page's compact dashboard fits without scrolling (see
-/// useCompactLayout.ts in web/). Made wider than 900 it shows the full
-/// dashboard.
-const DEFAULT_SIZE: (i32, i32) = (420, 580);
+/// It opens with room for the full dashboard, on a screen that has the
+/// room. Made narrower than 900 the page changes to its compact layout
+/// (see useCompactLayout.ts in web/), as it does in a browser.
+const DEFAULT_SIZE: (i32, i32) = (1180, 760);
 const MIN_SIZE: (i32, i32) = (360, 300);
 /// The dashboard's dark page colour, shown until the page has drawn so
 /// the window doesn't flash white.
@@ -75,6 +71,11 @@ const GO_TO_SETTINGS: &str =
 /// arrives inside a WebView2 callback, which is no place to move, resize
 /// or close the window that control lives in.
 const WM_PAGE_ASKED: u32 = WM_APP + 1;
+/// Posted when the page's theme switch is used, with whether it is now
+/// dark in ``wparam``.
+const WM_PAGE_THEME: u32 = WM_APP + 2;
+/// What the page sends before the theme's name when its switch is used.
+const THEME_PREFIX: &str = "theme:";
 
 /// What the page's title bar can ask of the window.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -130,6 +131,34 @@ impl Ask {
     }
 }
 
+/// The page's name for a theme.
+fn theme_word(dark: bool) -> &'static str {
+    if dark { "dark" } else { "light" }
+}
+
+/// The theme the page said it changed to, if that is what it said.
+fn theme_from_page(message: &str) -> Option<bool> {
+    match message.strip_prefix(THEME_PREFIX)? {
+        "dark" => Some(true),
+        "light" => Some(false),
+        _ => None,
+    }
+}
+
+/// Run in the page before any of its own scripts: starts it in the
+/// compact window's theme, by putting that where the page keeps its
+/// choice (web/src/stores/theme.ts). Once per window rather than once per
+/// load, so reloading the page keeps a theme chosen since.
+fn start_in_theme(dark: bool) -> String {
+    let theme = theme_word(dark);
+    format!(
+        "try {{ if (!sessionStorage.getItem('vigil:themed')) {{ \
+         sessionStorage.setItem('vigil:themed', '1'); \
+         localStorage.setItem('theme', JSON.stringify({{ theme: '{theme}', active: '{theme}' }})); \
+         }} }} catch (e) {{}}"
+    )
+}
+
 /// Which page the window should be showing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Page {
@@ -181,7 +210,7 @@ pub fn show(origin: &str, token: &str, page: Page) -> Result<(), String> {
                 }
             });
         }
-        bring_forward(hwnd);
+        frame::bring_forward(hwnd);
         return Ok(());
     }
     if CREATING.replace(true) {
@@ -190,19 +219,6 @@ pub fn show(origin: &str, token: &str, page: Page) -> Result<(), String> {
     let result = create(origin, token, page);
     CREATING.set(false);
     result
-}
-
-fn bring_forward(hwnd: HWND) {
-    // SAFETY: plain calls on this thread's own window.
-    unsafe {
-        let show = if IsIconic(hwnd) != 0 {
-            SW_RESTORE
-        } else {
-            SW_SHOW
-        };
-        ShowWindow(hwnd, show);
-        SetForegroundWindow(hwnd);
-    }
 }
 
 fn create(origin: &str, token: &str, page: Page) -> Result<(), String> {
@@ -242,19 +258,8 @@ fn create(origin: &str, token: &str, page: Page) -> Result<(), String> {
                 std::io::Error::last_os_error()
             ));
         }
-        let maximized = place(hwnd);
-
-        // The title bar and Alt-Tab use the same picture as the tray.
-        let icons = [
-            load_icon(GetSystemMetrics(SM_CXICON).max(32)),
-            load_icon(GetSystemMetrics(SM_CXSMICON).max(16)),
-        ];
-        for (kind, icon) in [(ICON_BIG, icons[0]), (ICON_SMALL, icons[1])] {
-            if !icon.is_null() {
-                SendMessageW(hwnd, WM_SETICON, kind as WPARAM, icon as LPARAM);
-            }
-        }
-        (hwnd, icons, maximized)
+        let maximized = frame::place(hwnd, config::window_place(WindowKind::Full), DEFAULT_SIZE);
+        (hwnd, frame::set_icons(hwnd), maximized)
     };
 
     match webview(hwnd, origin, token, page) {
@@ -269,7 +274,7 @@ fn create(origin: &str, token: &str, page: Page) -> Result<(), String> {
                 // SAFETY: a plain call on this thread's own window.
                 unsafe { ShowWindow(hwnd, SW_MAXIMIZE) };
             }
-            bring_forward(hwnd);
+            frame::bring_forward(hwnd);
             Ok(())
         }
         Err(e) => {
@@ -277,129 +282,18 @@ fn create(origin: &str, token: &str, page: Page) -> Result<(), String> {
             // else refers to them.
             unsafe {
                 DestroyWindow(hwnd);
-                destroy_icons(icons);
+                frame::destroy_icons(icons);
             }
             Err(e)
         }
     }
 }
 
-/// Puts the window where it was when it was last closed. The first time,
-/// sizes it for its display's scaling and centres it on the primary
-/// display's work area (the screen less the taskbar). Returns whether it
-/// should be shown maximised.
-///
-/// # Safety
-/// ``hwnd`` must be a live window of this thread.
-unsafe fn place(hwnd: HWND) -> bool {
-    // SAFETY (caller): ``hwnd`` is live; ``area`` is a valid out-pointer.
-    unsafe {
-        if let Some(saved) = config::window_place()
-            && restore(hwnd, saved)
-        {
-            return saved.maximized;
-        }
-        let dpi = GetDpiForWindow(hwnd).max(96) as i32;
-        let mut area = RECT::default();
-        let have_area = SystemParametersInfoW(SPI_GETWORKAREA, 0, (&raw mut area).cast(), 0) != 0;
-        let mut width = DEFAULT_SIZE.0 * dpi / 96;
-        let mut height = DEFAULT_SIZE.1 * dpi / 96;
-        if !have_area {
-            SetWindowPos(
-                hwnd,
-                std::ptr::null_mut(),
-                0,
-                0,
-                width,
-                height,
-                SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOMOVE | SWP_FRAMECHANGED,
-            );
-            return false;
-        }
-        width = width.min(area.right - area.left);
-        height = height.min(area.bottom - area.top);
-        let x = area.left + (area.right - area.left - width) / 2;
-        let y = area.top + (area.bottom - area.top - height) / 2;
-        SetWindowPos(
-            hwnd,
-            std::ptr::null_mut(),
-            x,
-            y,
-            width,
-            height,
-            // Has the frame worked out again, now without its title bar.
-            SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
-        );
-        false
-    }
-}
-
-/// Gives the window a remembered rectangle, still hidden. Windows moves it
-/// back onto a screen if the display it was on has gone. False if the
-/// rectangle isn't one a window could have had, or Windows won't take it.
-///
-/// # Safety
-/// ``hwnd`` must be a live window of this thread.
-unsafe fn restore(hwnd: HWND, saved: WindowPlace) -> bool {
-    const LARGEST: i32 = 16_384;
-    if !(1..=LARGEST).contains(&saved.width) || !(1..=LARGEST).contains(&saved.height) {
-        return false;
-    }
-    let placement = WINDOWPLACEMENT {
-        length: std::mem::size_of::<WINDOWPLACEMENT>() as u32,
-        showCmd: SW_HIDE as u32,
-        rcNormalPosition: RECT {
-            left: saved.x,
-            top: saved.y,
-            right: saved.x.saturating_add(saved.width),
-            bottom: saved.y.saturating_add(saved.height),
-        },
-        ..Default::default()
-    };
-    // SAFETY (caller): ``hwnd`` is live; ``placement`` is a whole,
-    // correctly sized structure.
-    unsafe {
-        if SetWindowPlacement(hwnd, &placement) == 0 {
-            return false;
-        }
-        // Has the frame worked out again, now without its title bar.
-        SetWindowPos(
-            hwnd,
-            std::ptr::null_mut(),
-            0,
-            0,
-            0,
-            0,
-            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
-        );
-    }
-    true
-}
-
 /// Remembers where the window is, for the next time it is opened.
 fn remember_place(hwnd: HWND) {
-    let mut placement = WINDOWPLACEMENT {
-        length: std::mem::size_of::<WINDOWPLACEMENT>() as u32,
-        ..Default::default()
-    };
-    // SAFETY: a query of this thread's own window into a correctly sized
-    // structure.
-    if unsafe { GetWindowPlacement(hwnd, &mut placement) } == 0 {
-        return;
+    if let Some(place) = frame::placement(hwnd) {
+        config::remember_window_place(WindowKind::Full, place);
     }
-    let rect = placement.rcNormalPosition;
-    // A minimised window goes back to being maximised if that's what it
-    // was before.
-    let maximized = placement.showCmd == SW_SHOWMAXIMIZED as u32
-        || (placement.showCmd == SW_SHOWMINIMIZED as u32
-            && placement.flags & WPF_RESTORETOMAXIMIZED != 0);
-    config::remember_window_place(WindowPlace {
-        x: rect.left,
-        y: rect.top,
-        width: rect.right - rect.left,
-        height: rect.bottom - rect.top,
-        maximized,
-    });
 }
 
 /// Does what the page's title bar asked for.
@@ -481,6 +375,22 @@ fn tell_page(hwnd: HWND) {
     });
 }
 
+/// The compact window's theme switch was used: has the page follow, if
+/// the window is open.
+pub fn set_theme(dark: bool) {
+    let script = format!(
+        "window.dispatchEvent(new CustomEvent('vigil:theme', {{ detail: '{}' }}))",
+        theme_word(dark)
+    );
+    WINDOW.with(|window| {
+        if let Ok(window) = window.try_borrow()
+            && let Some(window) = window.as_ref()
+        {
+            let _ = window.webview.evaluate_script(&script);
+        }
+    });
+}
+
 /// Shows or hides the WebView2 control. A minimised window's page still
 /// counts as visible and goes on drawing its charts, sixty times a second,
 /// for nobody; hiding the control is what tells the page to stop.
@@ -516,6 +426,7 @@ fn webview(hwnd: HWND, origin: &str, token: &str, page: Page) -> Result<WebView,
     let mut context = WebContext::new(Some(data_dir()));
     WebViewBuilder::new_with_web_context(&mut context)
         .with_url(url)
+        .with_initialization_script(start_in_theme(config::window_look().dark))
         .with_background_color(BACKGROUND)
         .with_devtools(cfg!(debug_assertions))
         // The page's title bar. Only our own pages get this far: the
@@ -523,10 +434,15 @@ fn webview(hwnd: HWND, origin: &str, token: &str, page: Page) -> Result<WebView,
         .with_ipc_handler({
             let hwnd = hwnd as usize;
             move |request| {
-                if let Some(ask) = Ask::from_word(request.body()) {
+                let post = |msg: u32, wparam: WPARAM| {
                     // SAFETY: posting to this thread's own window; a
                     // window that has gone just drops the message.
-                    unsafe { PostMessageW(hwnd as HWND, WM_PAGE_ASKED, ask as WPARAM, 0) };
+                    unsafe { PostMessageW(hwnd as HWND, msg, wparam, 0) };
+                };
+                if let Some(ask) = Ask::from_word(request.body()) {
+                    post(WM_PAGE_ASKED, ask as WPARAM);
+                } else if let Some(dark) = theme_from_page(request.body()) {
+                    post(WM_PAGE_THEME, WPARAM::from(dark));
                 }
             }
         })
@@ -575,18 +491,7 @@ pub fn close() {
     // destroyed once.
     unsafe {
         DestroyWindow(window.hwnd);
-        destroy_icons(window.icons);
-    }
-}
-
-/// # Safety
-/// The icons must not be in use by a live window.
-unsafe fn destroy_icons(icons: [HICON; 2]) {
-    for icon in icons {
-        if !icon.is_null() {
-            // SAFETY (caller): made by ``load_icon`` and no longer used.
-            unsafe { DestroyIcon(icon) };
-        }
+        frame::destroy_icons(window.icons);
     }
 }
 
@@ -609,37 +514,19 @@ unsafe extern "system" fn window_proc(
                 }
                 0
             }
-            // No title bar: the page draws one. Windows works out the
-            // client area as usual, which leaves the resize borders at
-            // the sides and bottom, and then the top goes back to the
-            // window's top edge. ``lparam`` points at the window's
-            // rectangle either way (the first of three when ``wparam``
-            // is set).
-            WM_NCCALCSIZE => {
-                let rect = lparam as *mut RECT;
-                if rect.is_null() {
-                    return DefWindowProcW(hwnd, msg, wparam, lparam);
-                }
-                let top = (*rect).top;
-                let result = DefWindowProcW(hwnd, msg, wparam, lparam);
-                // A maximised window hangs over every edge of the screen
-                // by its border, top included.
-                let overhang = if IsZoomed(hwnd) != 0 {
-                    let dpi = GetDpiForWindow(hwnd).max(96);
-                    GetSystemMetricsForDpi(SM_CYSIZEFRAME, dpi)
-                        + GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi)
-                } else {
-                    0
-                };
-                (*rect).top = top + overhang;
-                result
-            }
+            // No title bar: the page draws one.
+            WM_NCCALCSIZE => frame::without_title_bar(hwnd, wparam, lparam),
             WM_PAGE_ASKED => {
                 if let Some(ask) = Ask::from_wparam(wparam)
                     && !CREATING.get()
                 {
                     page_asked(hwnd, ask);
                 }
+                0
+            }
+            // The compact window keeps the same theme, now and next time.
+            WM_PAGE_THEME => {
+                crate::compact::theme_changed(wparam != 0);
                 0
             }
             WM_SIZE => {
@@ -652,33 +539,11 @@ unsafe extern "system" fn window_proc(
                 DefWindowProcW(hwnd, msg, wparam, lparam)
             }
             WM_GETMINMAXINFO => {
-                let info = lparam as *mut MINMAXINFO;
-                if !info.is_null() {
-                    let dpi = GetDpiForWindow(hwnd).max(96) as i32;
-                    (*info).ptMinTrackSize = POINT {
-                        x: MIN_SIZE.0 * dpi / 96,
-                        y: MIN_SIZE.1 * dpi / 96,
-                    };
-                }
+                frame::no_smaller_than(hwnd, lparam, MIN_SIZE);
                 0
             }
-            // Dragged to a display with different scaling: take the size
-            // Windows suggests, which keeps the window the same size to
-            // the eye.
             WM_DPICHANGED => {
-                let rect = lparam as *const RECT;
-                if !rect.is_null() {
-                    let r = *rect;
-                    SetWindowPos(
-                        hwnd,
-                        std::ptr::null_mut(),
-                        r.left,
-                        r.top,
-                        r.right - r.left,
-                        r.bottom - r.top,
-                        SWP_NOZORDER | SWP_NOACTIVATE,
-                    );
-                }
+                frame::follow_scaling(hwnd, lparam);
                 0
             }
             _ => DefWindowProcW(hwnd, msg, wparam, lparam),
@@ -688,7 +553,24 @@ unsafe extern "system" fn window_proc(
 
 #[cfg(test)]
 mod tests {
-    use super::{Ask, POINT, is_web_address, point_lparam};
+    use super::{
+        Ask, POINT, is_web_address, point_lparam, start_in_theme, theme_from_page, theme_word,
+    };
+
+    #[test]
+    fn themes_go_to_the_page_and_back_by_name() {
+        assert_eq!(theme_from_page("theme:dark"), Some(true));
+        assert_eq!(theme_from_page("theme:light"), Some(false));
+        assert_eq!(theme_from_page("theme:pink"), None);
+        assert_eq!(theme_from_page("close"), None);
+        for dark in [true, false] {
+            assert_eq!(
+                theme_from_page(&format!("theme:{}", theme_word(dark))),
+                Some(dark)
+            );
+        }
+        assert!(start_in_theme(false).contains("{ theme: 'light', active: 'light' }"));
+    }
 
     #[test]
     fn every_ask_survives_the_trip_from_the_page() {

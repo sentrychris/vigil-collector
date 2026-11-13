@@ -38,15 +38,25 @@ function navigate(event: Event) {
   if (typeof path === "string" && path.startsWith("/")) router.push(path);
 }
 
+// The compact window's theme switch was used: follow it.
+function followTheme(event: Event) {
+  const name = (event as CustomEvent<unknown>).detail;
+  if (name === "dark" || name === "light") theme.set(name);
+}
+
 onMounted(() => {
   window.addEventListener("vigil:navigate", navigate);
+  window.addEventListener("vigil:theme", followTheme);
   // Shows the Settings link if this is the Vigil window.
   useControlStore().detect();
   // The page itself no longer scrolls there, so the part that does takes
   // the keyboard: Page Down and the arrow keys work without a click first.
   if (framed.value) body.value?.focus();
 });
-onBeforeUnmount(() => window.removeEventListener("vigil:navigate", navigate));
+onBeforeUnmount(() => {
+  window.removeEventListener("vigil:navigate", navigate);
+  window.removeEventListener("vigil:theme", followTheme);
+});
 </script>
 
 <template>

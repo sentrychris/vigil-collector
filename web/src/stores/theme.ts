@@ -1,4 +1,5 @@
 import { defineStore } from "pinia";
+import { useWindowFrame } from "@/composables/useWindowFrame";
 
 const body = <HTMLBodyElement>document.querySelector("body");
 
@@ -20,8 +21,15 @@ export const useThemeStore = defineStore("theme", {
       this.active = this.getActiveTheme();
     },
     toggle() {
-      this.theme = this.theme === "light" ? "dark" : "light";
-      body.dataset.theme = this.theme;
+      this.set(this.theme === "light" ? "dark" : "light");
+      // In the Vigil window the compact window keeps the same theme (see
+      // src/compact/ in the collector). In a browser this does nothing.
+      useWindowFrame().ask(this.theme === "light" ? "theme:light" : "theme:dark");
+    },
+    /** Changes to the light theme or the dark one. */
+    set(theme: "light" | "dark") {
+      this.theme = theme;
+      body.dataset.theme = theme;
       this.active = this.getActiveTheme();
     },
     getActiveTheme() {

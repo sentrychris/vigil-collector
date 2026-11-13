@@ -1,5 +1,9 @@
 mod cli;
+#[cfg(any(windows, test))]
+mod compact;
 mod config;
+#[cfg(windows)]
+mod frame;
 #[cfg(any(windows, test))]
 mod ico;
 mod log;
@@ -159,7 +163,15 @@ async fn main() -> anyhow::Result<()> {
         let window = window_endpoint
             .take()
             .map(|(origin, token)| tray::WindowEndpoint { origin, token });
-        match tray::Tray::start(url, commands.clone(), active_ws.clone(), window) {
+        // What the compact window shows: the readings as they are taken.
+        let feed = match compact::Feed::new(supervisor.readings()) {
+            Ok(feed) => Some(feed),
+            Err(e) => {
+                tracing::warn!("No compact window: {e}");
+                None
+            }
+        };
+        match tray::Tray::start(url, commands.clone(), active_ws.clone(), feed, window) {
             Ok(tray) => Some(tray),
             Err(e) => {
                 tracing::warn!("No tray icon: {e}");
