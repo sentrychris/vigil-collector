@@ -31,7 +31,7 @@ import { config } from "@/config";
 
 <style scoped>
 .site-footer {
-  background: linear-gradient(135deg, #111827 0%, #1e293b 100%);
+  background: var(--header-grad);
   color: #cbd5e1;
   position: relative;
   overflow: hidden;

@@ -13,9 +13,21 @@ body {
   height: 100%;
 }
 
+/* The light theme is the default; dark.scss replaces these. It is kept a
+   step below white on purpose: a cool grey page under off-white panels,
+   slate text instead of black, and dark bars a shade lighter than in the
+   dark theme, so no large area is pure white and no edge runs from
+   near-black straight to white. */
 body {
+  --page: #e1e6ed;
+  --surface: #e9edf3;
+  --surface-glass: rgba(240, 243, 248, 0.74);
+  --surface-edge: rgba(255, 255, 255, 0.55);
+  --header-grad: linear-gradient(135deg, #1c2638 0%, #2d3b51 100%);
+
   font-family: "Montserrat", "Open Sans", sans-serif;
-  background: #eeeeee;
+  background: var(--page);
+  color: #1e293b;
   position: relative;
 }
 
@@ -28,10 +40,10 @@ body::before {
   z-index: -1;
   pointer-events: none;
   background:
-    radial-gradient(900px circle at 12% 8%,  rgba(96, 165, 250, 0.22), transparent 65%),
-    radial-gradient(800px circle at 88% 22%, rgba(167, 139, 250, 0.18), transparent 65%),
-    radial-gradient(1000px circle at 55% 110%, rgba(34, 211, 238, 0.18), transparent 65%),
-    radial-gradient(700px circle at 30% 85%, rgba(16, 185, 129, 0.10), transparent 60%);
+    radial-gradient(900px circle at 12% 8%,  rgba(96, 165, 250, 0.16), transparent 65%),
+    radial-gradient(800px circle at 88% 22%, rgba(167, 139, 250, 0.13), transparent 65%),
+    radial-gradient(1000px circle at 55% 110%, rgba(34, 211, 238, 0.12), transparent 65%),
+    radial-gradient(700px circle at 30% 85%, rgba(16, 185, 129, 0.07), transparent 60%);
 }
 
 #app {
@@ -213,23 +225,23 @@ h2.header {
 .panel-card {
   border-radius: 14px !important;
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.72) !important;
-  border: 1px solid rgba(255, 255, 255, 0.85) !important;
+  background: var(--surface-glass) !important;
+  border: 1px solid var(--surface-edge) !important;
   /* No backdrop-filter here. The only thing behind a panel is the page's
      soft gradient, which looks the same blurred as not, and a blurred
      backdrop is worked out again for the whole panel whenever anything
      inside it moves: every frame of every chart. */
   box-shadow:
-    0 1px 0 rgba(255, 255, 255, 0.9) inset,
-    0 8px 24px -8px rgba(15, 23, 42, 0.18),
-    0 24px 48px -16px rgba(15, 23, 42, 0.18) !important;
+    0 1px 0 rgba(255, 255, 255, 0.5) inset,
+    0 8px 24px -8px rgba(15, 23, 42, 0.16),
+    0 24px 48px -16px rgba(15, 23, 42, 0.16) !important;
   transition: transform 0.25s ease, box-shadow 0.25s ease,
     border-color 0.25s ease;
 }
 .panel-card:hover {
   transform: translateY(-2px);
   box-shadow:
-    0 1px 0 rgba(255, 255, 255, 0.9) inset,
+    0 1px 0 rgba(255, 255, 255, 0.5) inset,
     0 12px 32px -10px rgba(15, 23, 42, 0.22),
     0 32px 64px -20px rgba(15, 23, 42, 0.22) !important;
 }
@@ -295,7 +307,7 @@ svg.d3-svg {
   width: 100%;
   height: 100%;
   overflow: visible;
-  background: #eee;
+  background: var(--surface);
 }
 
 /* we will explain what these classes do next! */

@@ -43,7 +43,7 @@ const loader = useLoadingStore();
   align-items: center;
   justify-content: space-between;
   padding: 0.55rem 0.9rem;
-  background: linear-gradient(135deg, #111827 0%, #1e293b 100%);
+  background: var(--header-grad);
   color: #f1f5f9;
   position: relative;
   overflow: hidden;
@@ -99,7 +99,7 @@ const loader = useLoadingStore();
 .stat-body {
   flex: 1;
   padding: 0.7rem 0.95rem 0.85rem;
-  background: #ffffff;
+  background: var(--surface);
 }
 @media (max-width: 575.98px) {
   .stat-header { padding: 0.45rem 0.75rem; }
