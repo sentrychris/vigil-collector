@@ -5,6 +5,7 @@ import { useThemeStore } from "@/stores/theme";
 import { useSystemStore } from "@/stores/system";
 import { useControlStore } from "@/stores/control";
 import { useWindowFrame } from "@/composables/useWindowFrame";
+import { useCompactLayout } from "@/composables/useCompactLayout";
 import PageHeader from "@/components/PageHeader.vue";
 import SiteLogo from "@/components/SiteLogo.vue";
 
@@ -12,6 +13,7 @@ const theme = useThemeStore();
 const system = useSystemStore();
 const control = useControlStore();
 const frame = useWindowFrame();
+const { compact } = useCompactLayout();
 
 // In the Vigil window this bar is the title bar: pressing an empty part of
 // it moves the window, and a double press maximises it or puts it back.
@@ -32,7 +34,7 @@ const node = computed(() => {
 <template>
   <nav
     class="navbar navbar-expand-lg site-navbar shadow-lg"
-    :class="{ 'is-window': frame.framed.value }"
+    :class="{ 'is-window': frame.framed.value, 'is-compact': compact }"
     @mousedown="barPressed"
   >
     <div class="container-fluid py-2 nav-container">
@@ -441,6 +443,53 @@ const node = computed(() => {
 .resize-top-right {
   right: 0;
   cursor: nesw-resize;
+}
+
+/* ---------- The bar of the small window ---------- */
+/* Everything a size down, so the bar is in proportion to the compact
+   dashboard beneath it. */
+.site-navbar.is-compact { --bar-height: 32px; }
+.is-compact .nav-container {
+  padding: 0 calc(120px + 0.4rem) 0 0.6rem !important;
+}
+.is-compact .navbar-brand :deep(.site-logo) {
+  width: 20px;
+  height: 20px;
+}
+.is-compact .nav-controls { gap: 0.35rem; }
+.is-compact .control-divider { display: none; }
+.is-compact .status-chip {
+  gap: 0.35rem;
+  padding: 0.12rem 0.45rem;
+  font-size: 9px;
+}
+.is-compact .status-dot {
+  width: 6px;
+  height: 6px;
+}
+.is-compact .node-chip { display: none; }
+.is-compact .nav-button {
+  width: 26px;
+  height: 20px;
+  font-size: 10px;
+}
+.is-compact .nav-toggle-track {
+  width: 40px;
+  height: 20px;
+  padding: 0 5px;
+}
+.is-compact .track-icon { font-size: 8px; }
+.is-compact .nav-toggle-thumb {
+  width: 14px;
+  height: 14px;
+}
+.is-compact .nav-toggle input:checked ~ .nav-toggle-track .nav-toggle-thumb {
+  transform: translateX(20px);
+}
+.is-compact .window-button { width: 40px; }
+/* Narrower than this, the word goes and the dot says it. */
+@media (max-width: 379.98px) {
+  .is-compact .status-text { display: none; }
 }
 
 /* ---------- Toggle switches ---------- */

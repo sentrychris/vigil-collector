@@ -269,6 +269,15 @@ drawing. On a machine without
 WebView2, the menu opens the dashboard in the browser and the settings
 file in your editor instead.
 
+It opens small, as a monitor for a corner of the screen, and at that size
+shows a compact dashboard made to fit without scrolling: the platform,
+CPU, memory, disk and network each on one line with the last minute as a
+sparkline, the service checks (one line while all is well; press it to
+list them), and the busiest programs by CPU or memory (press a heading to
+sort by it). Make the window wider than 900 pixels, or maximise it, for
+the full dashboard with its charts. The window reopens where it was last
+closed, at the size it was.
+
 The gear in the window's top bar opens **Settings**, which only the window
 has (a browser never sees it, on this computer or another):
 
@@ -465,9 +474,9 @@ Current snapshot of the host. Same payload that the WebSocket pushes.
 | `disk_io.read_iops` / `write_iops` | number | Aggregate disk operations/sec |
 | `network.rx_bytes_per_sec` | number | Receive throughput (loopback excluded) |
 | `network.tx_bytes_per_sec` | number | Transmit throughput |
-| `processes[]` | array | Top 10 by memory, aggregated by process name |
+| `processes[]` | array | Top 10 by memory, aggregated by process name. Each has `mem` (MiB) and `cpu` |
 | `processes_metric` | string | `"pss"` or `"rss"` - tells the UI which accounting was used (`"rss"` = working set on Windows) |
-| `processes_by_cpu[]` | array | Top 10 by CPU %, aggregated by process name |
+| `processes_by_cpu[]` | array | Top 10 by CPU %, aggregated by process name. Each has `cpu` (percent of one core, so it can pass 100) and `mem` |
 | `platform.distro` / `kernel` / `uptime` | string | OS info + human-readable uptime |
 | `user` | string | Logged-in user |
 

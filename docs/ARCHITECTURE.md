@@ -268,6 +268,17 @@ page.
   tray falls back to the browser. While the window is minimised the
   control is hidden (`show_page`), because WebView2 doesn't otherwise
   tell the page it can't be seen and the charts would go on drawing.
+- **Two dashboards.** The window opens 420 by 580 (`DEFAULT_SIZE`), and
+  below 900 pixels wide the page shows the compact dashboard
+  ([components/compact](../web/src/components/compact),
+  [useCompactLayout.ts](../web/src/composables/useCompactLayout.ts))
+  instead of the full one; a browser always gets the full one. The
+  compact one has no chart loops at all: its sparklines are redrawn from
+  `system.history` when a reading arrives. `DEFAULT_SIZE` is the size at
+  which it fits without scrolling, so the two change together. Where the
+  window was and how big is kept in `window.json` beside the private
+  port, and given back with `SetWindowPlacement`, which also brings a
+  window home from a display that has gone.
 - **Drawing** ([frame-loop.ts](../web/src/utilities/frame-loop.ts)). A
   monitor shouldn't be the busiest thing it monitors, and a page that
   redraws on every display frame is: it measured about one whole core.

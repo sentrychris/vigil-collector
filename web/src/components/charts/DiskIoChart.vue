@@ -2,6 +2,7 @@
 import * as d3 from "d3";
 import { ref, computed, onMounted, onUnmounted, watch } from "vue";
 import { useResizeObserver } from "@/utilities/resize-observer";
+import { formatRate } from "@/utilities/format-rate";
 import { easeToward, frameLoop, type FrameLoop } from "@/utilities/frame-loop";
 import type { RealtimeDataPoint } from "@/interfaces/ChartRegistry";
 
@@ -26,12 +27,6 @@ const WRITE_TONE = {
 const KB = 1024;
 const MB = 1024 * 1024;
 const MIN_Y = 64 * KB;
-
-function formatRate(bps: number): { value: string; unit: string } {
-  if (bps >= MB) return { value: (bps / MB).toFixed(2), unit: "MB/s" };
-  if (bps >= KB) return { value: (bps / KB).toFixed(1), unit: "KB/s" };
-  return { value: String(Math.round(bps)), unit: "B/s" };
-}
 
 const liveRead = ref(0);
 const liveWrite = ref(0);

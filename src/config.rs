@@ -296,26 +296,75 @@ fn window_file() -> PathBuf {
     settings_dir().join("window.json")
 }
 
+/// Where the desktop window was and how big, when it was last closed: its
+/// restored (not maximised) rectangle in the pixels and coordinates of
+/// Win32's ``WINDOWPLACEMENT``, and whether it was maximised.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WindowPlace {
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+    #[serde(default)]
+    pub maximized: bool,
+}
+
 #[derive(Default, Serialize, Deserialize)]
 struct WindowState {
     #[serde(default)]
     port: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    place: Option<WindowPlace>,
+}
+
+/// What ``window.json`` holds, or nothing remembered if it is missing or
+/// not in a form this version understands.
+fn window_state() -> WindowState {
+    fs::read_to_string(window_file())
+        .ok()
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_default()
+}
+
+/// Best effort: a window that can't be remembered still works.
+fn remember_window_state(state: &WindowState) {
+    if let Ok(json) = serde_json::to_string(state) {
+        let _ = fs::create_dir_all(settings_dir());
+        let _ = fs::write(window_file(), json);
+    }
 }
 
 /// The local port the desktop window used last time, if any. Using the
 /// same one again keeps what the dashboard stores in the browser (theme,
 /// live or static mode), which is kept per address and port.
 pub fn window_port() -> Option<u16> {
-    let raw = fs::read_to_string(window_file()).ok()?;
-    let state: WindowState = serde_json::from_str(&raw).ok()?;
-    (state.port != 0).then_some(state.port)
+    let port = window_state().port;
+    (port != 0).then_some(port)
 }
 
-/// Remembers the window's local port for next time. Best effort.
+/// Remembers the window's local port for next time.
 pub fn remember_window_port(port: u16) {
-    if let Ok(json) = serde_json::to_string(&WindowState { port }) {
-        let _ = fs::create_dir_all(settings_dir());
-        let _ = fs::write(window_file(), json);
+    let mut state = window_state();
+    if state.port != port {
+        state.port = port;
+        remember_window_state(&state);
+    }
+}
+
+/// Where the desktop window was when it was last closed, if it has been.
+// Only a build with the window (see window.rs) has one to place.
+#[allow(dead_code)]
+pub fn window_place() -> Option<WindowPlace> {
+    window_state().place
+}
+
+/// Remembers where the window is, so it opens there next time.
+#[allow(dead_code)]
+pub fn remember_window_place(place: WindowPlace) {
+    let mut state = window_state();
+    if state.place != Some(place) {
+        state.place = Some(place);
+        remember_window_state(&state);
     }
 }
 
@@ -330,7 +379,35 @@ pub fn read_settings() -> Settings {
 
 #[cfg(test)]
 mod tests {
-    use super::Settings;
+    use super::{Settings, WindowPlace, WindowState};
+
+    #[test]
+    fn window_file_from_before_places_still_reads() {
+        let state: WindowState = serde_json::from_str(r#"{"port":4712}"#).unwrap();
+        assert_eq!(state.port, 4712);
+        assert_eq!(state.place, None);
+        // And nothing is written for a place that was never remembered.
+        assert_eq!(serde_json::to_string(&state).unwrap(), r#"{"port":4712}"#);
+    }
+
+    #[test]
+    fn window_place_is_kept_beside_the_port() {
+        let place = WindowPlace {
+            x: -1200,
+            y: 40,
+            width: 420,
+            height: 580,
+            maximized: true,
+        };
+        let state = WindowState {
+            port: 4712,
+            place: Some(place),
+        };
+        let back: WindowState =
+            serde_json::from_str(&serde_json::to_string(&state).unwrap()).unwrap();
+        assert_eq!(back.port, 4712);
+        assert_eq!(back.place, Some(place));
+    }
 
     #[test]
     fn partial_settings_fill_in_defaults() {
