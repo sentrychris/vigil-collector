@@ -149,6 +149,12 @@ impl Supervisor {
         self.sampler.json()
     }
 
+    /// The sampler's readings as they are taken, for the compact window.
+    #[cfg(windows)]
+    pub fn readings(&self) -> watch::Receiver<Arc<crate::snapshot::Snapshot>> {
+        self.sampler.readings()
+    }
+
     pub fn push_interval_ms(&self) -> Arc<AtomicU64> {
         self.push_interval_ms.clone()
     }

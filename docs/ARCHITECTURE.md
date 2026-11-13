@@ -30,8 +30,17 @@ src/
 ├── config.rs            settings.json load + first-run defaults + migration
 ├── log.rs               tracing setup (stdout + file, classic timestamp, Windows ANSI)
 ├── tray.rs              Windows: launcher hand-off and the notification-area icon + menu
-├── window.rs            Windows: the Vigil window, a WebView2 control on the tray thread
-├── window_none.rs       its stand-in where the window isn't built (MinGW without the feature)
+├── compact/             the Vigil window: a compact dashboard drawn without a browser
+│   ├── mod.rs           includes the layout Slint makes of ui/compact.slint
+│   ├── view.rs          words the readings; keeps the sparklines' minute of history
+│   ├── spark.rs         the sparklines' curves and the tint under them
+│   ├── surface.rs       where Slint paints: a block of pixels in memory
+│   ├── bar.rs           which part of the window's top drags it or resizes it
+│   ├── host.rs          Windows: the Win32 window those pixels are shown in
+│   └── tests.rs         draws the window into a picture on every platform
+├── frame.rs             Windows: what both windows share (no title bar, remembered place)
+├── window.rs            Windows: the full dashboard's window, a WebView2 control
+├── window_none.rs       its stand-in where it isn't built (MinGW without the feature)
 ├── ico.rs               picks the right-sized image out of the .ico for the tray
 ├── snapshot.rs          shared data model + per-endpoint projections
 ├── sampler.rs           1 Hz tick loop, refresh state, ArcSwap JSON cache
@@ -52,8 +61,10 @@ src/
 │   ├── ws.rs            WebSocket upgrade and per-client push loop
 │   ├── worker.rs        single-use 5-second token registry for WS handshake
 │   └── probes.rs        external HTTP health checks (parallel reqwest)
-build.rs                 runs `npm ci` / `vite build` in web/ so the binary can embed web/dist
+build.rs                 runs `npm ci` / `vite build` in web/ so the binary can embed web/dist,
+                         compiles ui/compact.slint
                          (and, for Windows targets, gives the .exe its icon and version details)
+ui/                      the compact window's layout (Slint), its icons, logo and fonts
 web/                     the Vue dashboard (Vite + TypeScript), served at / from the binary
 ```
 
@@ -155,8 +166,8 @@ output is redirected), the process that was started is only a launcher:
 it starts a console-less copy with `VIGIL_TRAY_CHILD=1`, relays its
 startup log until the copy prints a private "listening" line, and exits.
 The copy runs the model above plus one OS thread, `tray`, which owns a
-hidden window, the notification-area icon, the Vigil window when it's
-open, and the Win32 message loop. Menu choices reach the supervisor as
+hidden window, the notification-area icon, the Vigil window and the full
+dashboard's window when they are open, and the Win32 message loop. Menu choices reach the supervisor as
 `supervisor::Command`s over an unbounded channel, the same one the
 control API sends on; a task in `main` watches the supervisor's status
 and tells the tray when the address changes or the server stops. The
@@ -218,7 +229,10 @@ a regression even if tests still pass.
 
 ## The window and the control API
 
-The dashboard can't tell a browser from the Vigil window by itself; what
+This is about the window for the full dashboard and the Settings page,
+which is a web page in a WebView2 control. (The window the tray icon
+opens is a different one; see [The compact window](#the-compact-window).)
+The dashboard can't tell a browser from this window by itself; what
 it can do is ask for `/control/status`. Only the private listener answers,
 so only the window gets a Settings link and the lazily loaded Settings
 page.
@@ -227,7 +241,7 @@ page.
  tray thread (Win32)                     tokio runtime
  ┌──────────────────────────┐            ┌─────────────────────────────────┐
  │ icon + menu ─────────────┼─ Command ─▶│ Supervisor ── public listener   │
- │ Vigil window (WebView2)  │            │   ▲   │       address:port      │
+ │ Full dashboard (WebView2)│            │   ▲   │       address:port      │
  │   └ loads 127.0.0.1:P ───┼── HTTP ───▶│   │   └─ status (watch) ─▶ tray │
  └──────────────────────────┘            │ private listener 127.0.0.1:P    │
                                          │   dashboard + /control (token)  │
@@ -268,17 +282,19 @@ page.
   tray falls back to the browser. While the window is minimised the
   control is hidden (`show_page`), because WebView2 doesn't otherwise
   tell the page it can't be seen and the charts would go on drawing.
-- **Two dashboards.** The window opens 420 by 580 (`DEFAULT_SIZE`), and
-  below 900 pixels wide the page shows the compact dashboard
+- **The page's own compact layout.** The window opens with room for the
+  full dashboard. Made narrower than 900 pixels, the page shows a compact
+  dashboard
   ([components/compact](../web/src/components/compact),
   [useCompactLayout.ts](../web/src/composables/useCompactLayout.ts))
-  instead of the full one; a browser always gets the full one. The
-  compact one has no chart loops at all: its sparklines are redrawn from
-  `system.history` when a reading arrives. `DEFAULT_SIZE` is the size at
-  which it fits without scrolling, so the two change together. Where the
-  window was and how big is kept in `window.json` beside the private
-  port, and given back with `SetWindowPlacement`, which also brings a
-  window home from a display that has gone.
+  instead of the full one; a browser always gets the full one. This is
+  the layout the native compact window (below) was copied from, and what
+  the Vigil window was before it. The compact one has no chart loops at
+  all: its sparklines are redrawn from `system.history` when a reading
+  arrives. Where each window was and how big is kept in `window.json`
+  beside the private port (`place` for the compact window, `full` for
+  this one), and given back with `SetWindowPlacement`, which also brings
+  a window home from a display that has gone.
 - **Drawing** ([frame-loop.ts](../web/src/utilities/frame-loop.ts)). A
   monitor shouldn't be the busiest thing it monitors, and a page that
   redraws on every display frame is: it measured about one whole core.
@@ -306,6 +322,73 @@ applied, for example a port in use) or 500 (applied but not saved).
 
 For development, `VIGIL_CONTROL_PORT` and `VIGIL_CONTROL_TOKEN` start the
 private listener on any platform (see the README's Development section).
+
+## The compact window
+
+The window the tray icon opens ([src/compact/](../src/compact/mod.rs)) is
+not a web page. It is the same picture as the page's compact layout,
+laid out by [Slint](https://slint.dev) from
+[ui/compact.slint](../ui/compact.slint) and painted by Slint's software
+renderer, with no WebView2, no GPU and no windowing library.
+
+```
+ sampler tick ── watch::Sender<Arc<Snapshot>> ──┐          (runtime thread)
+                                                │ a task posts WM_READINGS
+                                                ▼
+ tray thread:  host.rs window procedure ── view.rs sets the layout's properties
+                    │  WM_PAINT                    │ Slint marks what changed
+                    ▼                              ▼
+              SetDIBitsToDevice  ◀── surface.rs: SoftwareRenderer paints the
+              (one copy to screen)   changed part of a kept BGRX buffer
+```
+
+- **No windowing backend.** Slint is built with only `renderer-software`
+  (see Cargo.toml), so winit and the GPU renderers are not compiled in.
+  `surface.rs` gives Slint a `Platform` with a clock and a
+  `WindowAdapter` that is just a size, a scale and a dirty flag. The
+  renderer paints into pixels laid out as a Windows 32-bit bitmap, so
+  `host.rs` hands the buffer to GDI unconverted.
+- **Paints on change.** Slint tracks which properties a frame read. The
+  window is invalidated when one of them changes, which while it sits
+  there is once per reading; the renderer then repaints only the changed
+  regions. A timer runs Slint's clock only while an animation (a switch
+  sliding) is in progress. Minimised, readings still go into the
+  sparklines' history but nothing is laid out or painted.
+- **Readings without JSON.** The sampler keeps its newest `Snapshot` in a
+  `watch` channel beside the JSON cache. A task on the runtime thread
+  posts the window a message per reading and the window reads the
+  snapshot itself. Service checks run on the runtime thread
+  (`probes::run`) and come back over a channel the same way.
+- **The frame** is shared with the full dashboard's window
+  ([frame.rs](../src/frame.rs)): `WM_NCCALCSIZE` removes the title bar,
+  and `WM_NCHITTEST` says which parts of the picture stand in for it
+  ([bar.rs](../src/compact/bar.rs)): the bar drags, its top edge resizes.
+- **What Slint's software renderer doesn't do**, and how the layout gets
+  by: no gradients inside paths (the tint under a sparkline is a small
+  picture painted in `spark.rs`), no drop shadows and no clipping to
+  rounded corners (the glows around the web version's icons are left
+  out).
+- **The page behind the cards** is a picture too
+  ([backdrop.rs](../src/compact/backdrop.rs)), painted when the window's
+  size or theme changes. As five overlapping round gradients in the
+  layout, it was worked out again for every repainted pixel and was
+  nearly all of the cost of a reading: about 18 ms at 150% scaling on a
+  2.1 GHz cloud processor, against about 2.5 ms with the picture.
+- **Fonts and icons** are built in: Montserrat, IBM Plex Mono and Lato
+  ([ui/fonts](../ui/fonts/README.md), Open Font License) and outlines
+  from Font Awesome Free ([ui/icons.slint](../ui/icons.slint), CC BY 4.0).
+- **Theme.** The theme and the live/paused switch are kept in
+  `window.json`. The full dashboard's page starts in the same theme
+  (`start_in_theme` in window.rs) and each tells the other when its
+  switch is used (`theme:` over `window.ipc`, a `vigil:theme` event
+  back).
+- **Tests.** `tests.rs` draws the window headlessly on every platform and
+  checks pixels (`VIGIL_PREVIEW_DIR` saves the pictures). On Windows,
+  `host.rs` also has a test that opens the real window with made-up
+  readings, paints it, sends it the mouse and closes it.
+- **Licence.** Slint is used under its royalty-free licence, whose
+  condition is the "Made with Slint" badge on the project's public page
+  (it is in the README). Vigil's own code stays MIT.
 
 ## Configuration
 

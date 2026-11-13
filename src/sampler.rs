@@ -6,7 +6,7 @@ use bytes::Bytes;
 use sysinfo::{
     CpuRefreshKind, DiskRefreshKind, Disks, MemoryRefreshKind, Networks, RefreshKind, System, Users,
 };
-use tokio::sync::Notify;
+use tokio::sync::{Notify, watch};
 use tokio::task::JoinHandle;
 
 use crate::metrics;
@@ -199,6 +199,10 @@ fn tick_interval(secs: f64) -> Duration {
 pub struct Sampler {
     interval: Duration,
     json: Arc<CachedJson>,
+    /// The newest readings as they were taken, for the compact window,
+    /// which shows them without a trip through JSON. Also how it hears
+    /// that there are new ones.
+    readings: watch::Sender<Arc<Snapshot>>,
     stop: Arc<Notify>,
     handle: Option<JoinHandle<()>>,
 }
@@ -209,6 +213,7 @@ impl Sampler {
         Self {
             interval,
             json: Arc::new(CachedJson::new()),
+            readings: watch::Sender::new(Arc::new(Snapshot::default())),
             stop: Arc::new(Notify::new()),
             handle: None,
         }
@@ -222,6 +227,12 @@ impl Sampler {
         self.json.clone()
     }
 
+    /// The newest readings, and word of each new set.
+    #[cfg(windows)]
+    pub fn readings(&self) -> watch::Receiver<Arc<Snapshot>> {
+        self.readings.subscribe()
+    }
+
     /// Start the sampling loop. Fails only if sysinfo can't initialise at
     /// all on this platform, which leaves nothing to serve.
     pub fn start(&mut self) -> anyhow::Result<()> {
@@ -231,12 +242,15 @@ impl Sampler {
 
         let interval = self.interval;
         let json = self.json.clone();
+        let readings = self.readings.clone();
         let stop = self.stop.clone();
 
         // Seed once synchronously so the first connecting client doesn't
         // see zeros for up to ``interval`` seconds.
         let mut state = Box::new(SamplerState::new()?);
-        json.publish(&state.refresh());
+        let first = state.refresh();
+        json.publish(&first);
+        readings.send_replace(Arc::new(first));
 
         let handle = tokio::spawn(async move {
             // ``interval`` rather than ``sleep`` keeps a steady cadence:
@@ -277,6 +291,7 @@ impl Sampler {
                     Ok((snapshot, returned)) => {
                         state = Some(returned);
                         json.publish(&snapshot);
+                        readings.send_replace(Arc::new(snapshot));
                     }
                     Err(e) => {
                         // The sampler must never die on a transient error;

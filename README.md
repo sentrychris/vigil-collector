@@ -21,6 +21,7 @@ in [web/](web/), built into the binary, so there's nothing else to deploy.
 - [Platform notes](#platform-notes)
 - [Development](#development)
 - [Architecture](#architecture)
+- [Credits](#credits)
 
 ## Quick start
 
@@ -177,13 +178,15 @@ any target. The `x86_64-pc-windows-msvc` target can't be cross-compiled from Lin
 way (ring needs `clang-cl` for it). Build MSVC binaries on Windows, or use
 the GNU target above.
 
-The one difference is [the Vigil window](#the-vigil-window). The MSVC
-build links the WebView2 loader into the exe. MinGW can't, and would need
-`WebView2Loader.dll` beside the exe to start at all, so a MinGW build
-leaves the window out and stays one file: its tray menu opens the browser
-and the settings file instead. To have the window in a MinGW build, add
-`--features window-on-mingw` and ship `WebView2Loader.dll` (from the
-WebView2 SDK) next to the exe.
+The one difference is the window for the full dashboard and Settings (see
+[The Vigil window](#the-vigil-window)). The MSVC build links the WebView2
+loader into the exe. MinGW can't, and would need `WebView2Loader.dll`
+beside the exe to start at all, so a MinGW build leaves that window out
+and stays one file: the full dashboard opens in the browser and Settings
+opens the settings file instead. The compact window, which needs no
+WebView2, is in every Windows build. To have the other in a MinGW build
+too, add `--features window-on-mingw` and ship `WebView2Loader.dll` (from
+the WebView2 SDK) next to the exe.
 
 ## Running
 
@@ -217,12 +220,13 @@ crash.
 ### The system tray on Windows
 
 On Windows, Vigil runs in the background with an icon in the
-notification area. Double-click the icon to open the dashboard in its own
-window. Right-click it for a menu:
+notification area. Double-click the icon to open the Vigil window, a
+compact dashboard. Right-click it for a menu:
 
-- **Open Vigil** shows the window. **Open in browser** opens the same
-  dashboard in your browser instead.
-- **Settings** opens the window on its [Settings page](#the-vigil-window).
+- **Open Vigil** shows the window. **Full dashboard** opens the dashboard
+  with its charts in a window of its own, and **Open in browser** opens
+  that in your browser instead.
+- **Settings** opens the [Settings page](#the-vigil-window).
 - How many dashboards are connected, and the address.
 - **Stop serving** closes the server to browsers and other devices while
   Vigil keeps monitoring and the window keeps working. **Start serving**
@@ -259,27 +263,31 @@ In the tray, the log is written to the log file (see
 
 ### The Vigil window
 
-The window is the dashboard, drawn by the WebView2 runtime that comes with
-Windows 10 and 11. It has no separate title bar: the dashboard's top bar
-is the title bar, with the minimise, maximise and close buttons in its
-corner. Drag the bar to move the window, double-click it to maximise.
-Closing it leaves Vigil running in the tray; nothing of
-the window stays in memory until it's opened again. Minimised, it stops
-drawing. On a machine without
-WebView2, the menu opens the dashboard in the browser and the settings
-file in your editor instead.
+The window is a small monitor for a corner of the screen. It shows the
+platform, CPU, memory, disk and network each on one line with the last
+minute as a sparkline, the service checks (one line while all is well;
+press it to list them), and the busiest programs by CPU or memory (press
+a heading to sort by it).
 
-It opens small, as a monitor for a corner of the screen, and at that size
-shows a compact dashboard made to fit without scrolling: the platform,
-CPU, memory, disk and network each on one line with the last minute as a
-sparkline, the service checks (one line while all is well; press it to
-list them), and the busiest programs by CPU or memory (press a heading to
-sort by it). Make the window wider than 900 pixels, or maximise it, for
-the full dashboard with its charts. The window reopens where it was last
-closed, at the size it was.
+Vigil draws this window itself. There is no browser in it: the layout is
+written in [Slint](https://slint.dev) and painted on the processor, only
+when a reading changes, into an ordinary window. Minimised, it draws
+nothing. It has no separate title bar. Its top bar is the title bar: drag it to move the window, and use
+the switches in it to change between the dark and light themes and to
+pause the readings. Closing it leaves Vigil running in the tray. It
+reopens where it was last closed, at the size it was, in the theme it
+was.
 
-The gear in the window's top bar opens **Settings**, which only the window
-has (a browser never sees it, on this computer or another):
+The button beside the close button opens the **full dashboard**, with its
+charts and tables, in a second window. That one is the same page a
+browser gets, drawn by the WebView2 runtime that comes with Windows 10
+and 11, and it exists only while it is open. On a machine without
+WebView2, the full dashboard opens in the browser and Settings opens the
+settings file in your editor instead.
+
+The gear in either window's top bar opens **Settings**, in the second
+window. Only that window has it (a browser never sees it, on this
+computer or another):
 
 - **Server**: stop, start and restart it, choose who can connect (this
   computer only, any device on the network, or one address) and the port.
@@ -294,7 +302,7 @@ has (a browser never sees it, on this computer or another):
   **Quit Vigil**.
 
 Everything on the page is saved to the [settings file](#configuration) and
-takes effect without a restart. The window talks to Vigil over its own
+takes effect without a restart. That window talks to Vigil over its own
 listener on `127.0.0.1`, on a port other than the server's, which needs a
 key made afresh each time Vigil starts. The server other devices reach has
 no settings API at all.
@@ -625,13 +633,23 @@ unit-tests the dashboard, runs the Rust checks on Linux, Windows and macOS,
 then starts the release binary and checks that `/system`, `/network`,
 `/worker` and the dashboard (page and assets) respond, and that the
 settings API does not. Platform-specific code lives behind `#[cfg(...)]` in
-`src/metrics/`, `src/log.rs`, `src/tray.rs` and `src/window.rs`; if you
+`src/metrics/`, `src/log.rs`, `src/tray.rs`, `src/frame.rs`,
+`src/window.rs` and `src/compact/host.rs`; if you
 change it, cross-check the other targets:
 
 ```sh
 cargo clippy --all-targets --target x86_64-pc-windows-gnu -- -D warnings
 # the same again with the window compiled in:
 cargo clippy --all-targets --target x86_64-pc-windows-gnu --features window-on-mingw -- -D warnings
+```
+
+The compact window's layout is [ui/compact.slint](ui/compact.slint), and
+the code that feeds and shows it is in `src/compact/`. Only Windows opens
+the window, but its tests draw it on every platform, without a screen. To
+see what a change looks like, have them save what they draw:
+
+```sh
+VIGIL_PREVIEW_DIR=/tmp/vigil cargo test compact   # writes /tmp/vigil/compact-*.png
 ```
 
 Contributor docs, including the full data flow and runtime model, are in
@@ -723,3 +741,18 @@ The per-disk usage walk runs every tick too, but it's only
 End result: idle CPU usage settles around ~0.23% of a single core, and stays
 there regardless of how many clients connect, because the per-tick work
 doesn't scale with client count.
+
+## Credits
+
+Vigil is MIT licensed. It is built on, among others:
+
+- [Slint](https://slint.dev), which lays out and paints the Vigil window
+  on Windows, under its royalty-free licence.
+
+  [![Made with Slint](https://raw.githubusercontent.com/slint-ui/slint/master/logo/MadeWithSlint-logo-whitebg.png)](https://slint.dev)
+
+- [Montserrat](https://github.com/JulietaUla/Montserrat),
+  [IBM Plex Mono](https://github.com/IBM/plex) and
+  [Lato](https://www.latofonts.com), under the SIL Open Font License
+  ([ui/fonts/](ui/fonts/README.md)).
+- Icons from [Font Awesome Free](https://fontawesome.com) (CC BY 4.0).

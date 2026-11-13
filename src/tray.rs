@@ -15,9 +15,12 @@
 //! 2. The copy is the *tray process*. It runs the collector as usual and
 //!    owns the icon. Its log still goes to the log file. The menu also
 //!    shows how many dashboards are connected and the version, and
-//!    double-clicking the icon opens the Vigil window (``window.rs``):
-//!    the dashboard as a desktop program, with a Settings page. Without
-//!    WebView2 on the computer, it opens the dashboard in the browser.
+//!    double-clicking the icon opens the Vigil window: a compact
+//!    dashboard drawn by the program itself (``compact/``). The full
+//!    dashboard and the Settings page have a window of their own
+//!    (``window.rs``), opened from the compact one or from the menu.
+//!    Without WebView2 on the computer, those two open in the browser
+//!    and in the settings file's editor.
 //!
 //! Only one copy runs per computer (see ``Instance``). Started again while
 //! one is running, it opens that copy's window (double-clicked) or says
@@ -41,6 +44,7 @@ use std::thread::JoinHandle;
 
 use tokio::sync::mpsc::UnboundedSender;
 
+use crate::compact;
 use crate::supervisor::Command as Request;
 use crate::window::{self, Page};
 use windows_sys::Win32::Foundation::{
@@ -105,6 +109,7 @@ const ID_BROWSER: usize = 7;
 const ID_SETTINGS: usize = 8;
 /// "Stop serving" or "Start serving", whichever applies.
 const ID_SERVING: usize = 9;
+const ID_FULL: usize = 10;
 const WM_TRAY: u32 = WM_APP + 1;
 /// Posted by a second copy to the running one: open the window.
 const WM_OPEN_DASHBOARD: u32 = WM_APP + 2;
@@ -415,8 +420,8 @@ pub fn find_free_port() -> bool {
     std::env::var_os(FREE_PORT_ENV).is_some_and(|v| v == "1")
 }
 
-/// Where the Vigil window loads from: the tray process's private
-/// listener and its secret for this run (see ``server::control``).
+/// Where the full dashboard's window loads from: the tray process's
+/// private listener and its secret for this run (see ``server::control``).
 pub struct WindowEndpoint {
     /// ``http://127.0.0.1:<port>``
     pub origin: String,
@@ -433,19 +438,21 @@ pub struct Tray {
 impl Tray {
     /// ``url`` is the dashboard's address, shown in the tooltip and the
     /// menu. ``connections`` is the server's count of open WebSocket
-    /// sessions, read each time the menu opens. ``window`` is where the
-    /// Vigil window loads from; without it a double-click opens the
+    /// sessions, read each time the menu opens. ``feed`` is what the
+    /// compact window shows. ``window`` is where the full dashboard's
+    /// window loads from; without it the full dashboard opens in the
     /// browser.
     pub fn start(
         url: String,
         requests: UnboundedSender<Request>,
         connections: Arc<AtomicUsize>,
+        feed: Option<compact::Feed>,
         window: Option<WindowEndpoint>,
     ) -> anyhow::Result<Self> {
         let (ready_tx, ready_rx) = std_mpsc::channel();
         let thread = std::thread::Builder::new()
             .name("tray".into())
-            .spawn(move || run(url, requests, connections, window, ready_tx))?;
+            .spawn(move || run(url, requests, connections, feed, window, ready_tx))?;
         match ready_rx.recv() {
             Ok(Ok(hwnd)) => Ok(Self {
                 hwnd,
@@ -507,10 +514,13 @@ struct State {
     connections: Arc<AtomicUsize>,
     /// The dashboard's address, or ``None`` while the server is stopped.
     url: Option<String>,
+    feed: Option<compact::Feed>,
     window: Option<WindowEndpoint>,
     /// Whether the missing-WebView2 warning has been logged, so it is
     /// said once rather than at every double-click.
     warned: bool,
+    /// The same, for a compact window that couldn't be opened.
+    warned_compact: bool,
 }
 
 thread_local! {
@@ -581,6 +591,7 @@ fn run(
     url: String,
     requests: UnboundedSender<Request>,
     connections: Arc<AtomicUsize>,
+    feed: Option<compact::Feed>,
     window: Option<WindowEndpoint>,
     ready: std_mpsc::Sender<Result<usize, String>>,
 ) {
@@ -651,8 +662,10 @@ fn run(
             taskbar_created: RegisterWindowMessageW(wide("TaskbarCreated").as_ptr()),
             connections,
             url: Some(url),
+            feed,
             window,
             warned: false,
+            warned_compact: false,
         }));
 
         if Shell_NotifyIconW(NIM_ADD, &icon) == 0 {
@@ -673,6 +686,7 @@ fn run(
             DispatchMessageW(&msg);
         }
 
+        compact::close();
         window::close();
         STATE.set(None);
         if !hicon.is_null() {
@@ -706,6 +720,7 @@ pub(crate) fn load_icon(size: i32) -> HICON {
 ///
 /// ```text
 /// [logo] Open Vigil                  (bold: what a double-click does)
+///        Full dashboard
 ///        Open in browser
 ///        Settings
 /// ──────────────────────────────────
@@ -730,6 +745,7 @@ unsafe fn show_menu(hwnd: HWND) {
     };
     let serving = url.is_some();
     let open = wide("Open Vigil");
+    let full = wide("Full dashboard");
     let browser = wide("Open in browser");
     let settings = wide("Settings");
     let status = wide(status_text(serving.then_some(connections)));
@@ -751,6 +767,7 @@ unsafe fn show_menu(hwnd: HWND) {
         }
         AppendMenuW(menu, MF_STRING, ID_OPEN, open.as_ptr());
         SetMenuDefaultItem(menu, ID_OPEN as u32, 0);
+        AppendMenuW(menu, MF_STRING, ID_FULL, full.as_ptr());
         AppendMenuW(
             menu,
             MF_STRING | unless_serving,
@@ -842,10 +859,34 @@ fn open_browser() {
     }
 }
 
-/// Shows the Vigil window on ``page``. Where there can be no window (no
-/// WebView2 on this computer, or no private listener), the dashboard
-/// opens in the browser and Settings opens the settings file.
-fn open_vigil(page: Page) {
+/// Shows the Vigil window: the compact dashboard. If that can't be
+/// opened, the full dashboard is shown instead.
+fn open_vigil() {
+    let feed = STATE.with_borrow(|s| s.as_ref().and_then(|s| s.feed.clone()));
+    // Nothing of STATE is borrowed while the window is made: making a
+    // window calls back into this thread's window procedures.
+    let shown = match feed {
+        Some(feed) => compact::show(&feed),
+        None => Err("it has no readings to show".into()),
+    };
+    let Err(reason) = shown else {
+        return;
+    };
+    let first = STATE.with_borrow_mut(|s| {
+        s.as_mut()
+            .is_some_and(|s| !std::mem::replace(&mut s.warned_compact, true))
+    });
+    if first {
+        tracing::warn!("No compact window, so opening the full dashboard instead: {reason}");
+    }
+    open_full(Page::Dashboard);
+}
+
+/// Shows the full dashboard's window on ``page``. Where there can be no
+/// such window (no WebView2 on this computer, or no private listener),
+/// the dashboard opens in the browser and Settings opens the settings
+/// file.
+pub(crate) fn open_full(page: Page) {
     let endpoint = STATE.with_borrow(|s| {
         s.as_ref()
             .and_then(|s| s.window.as_ref())
@@ -865,7 +906,7 @@ fn open_vigil(page: Page) {
             .is_some_and(|s| !std::mem::replace(&mut s.warned, true))
     });
     if first {
-        tracing::warn!("No Vigil window, so using the browser instead: {reason}");
+        tracing::warn!("No window for the full dashboard, so using the browser instead: {reason}");
     }
     match page {
         Page::Dashboard => open_browser(),
@@ -1012,13 +1053,13 @@ unsafe extern "system" fn window_proc(
                 let event = (lparam as u32) & 0xFFFF;
                 match event {
                     WM_CONTEXTMENU | WM_RBUTTONUP => show_menu(hwnd),
-                    WM_LBUTTONDBLCLK => open_vigil(Page::Dashboard),
+                    WM_LBUTTONDBLCLK => open_vigil(),
                     _ => {}
                 }
                 0
             }
             WM_OPEN_DASHBOARD => {
-                open_vigil(Page::Dashboard);
+                open_vigil();
                 0
             }
             WM_SERVER_CHANGED => {
@@ -1032,9 +1073,10 @@ unsafe extern "system" fn window_proc(
                 match wparam & 0xFFFF {
                     ID_RESTART => send(Request::Restart(None)),
                     ID_QUIT => send(Request::Quit),
-                    ID_OPEN => open_vigil(Page::Dashboard),
+                    ID_OPEN => open_vigil(),
+                    ID_FULL => open_full(Page::Dashboard),
                     ID_BROWSER => open_browser(),
-                    ID_SETTINGS => open_vigil(Page::Settings),
+                    ID_SETTINGS => open_full(Page::Settings),
                     ID_SERVING => {
                         let serving =
                             STATE.with_borrow(|s| s.as_ref().is_some_and(|s| s.url.is_some()));

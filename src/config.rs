@@ -296,9 +296,10 @@ fn window_file() -> PathBuf {
     settings_dir().join("window.json")
 }
 
-/// Where the desktop window was and how big, when it was last closed: its
-/// restored (not maximised) rectangle in the pixels and coordinates of
-/// Win32's ``WINDOWPLACEMENT``, and whether it was maximised.
+/// Where one of the desktop windows was and how big, when it was last
+/// closed: its restored (not maximised) rectangle in the pixels and
+/// coordinates of Win32's ``WINDOWPLACEMENT``, and whether it was
+/// maximised.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WindowPlace {
     pub x: i32,
@@ -309,12 +310,48 @@ pub struct WindowPlace {
     pub maximized: bool,
 }
 
+/// Which of the two desktop windows: the compact one that the tray opens
+/// (``compact/``), or the one with the full dashboard and the Settings
+/// page (``window.rs``).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+// Only Windows has the windows; a MinGW build has just the compact one.
+#[allow(dead_code)]
+pub enum WindowKind {
+    Compact,
+    Full,
+}
+
+/// How the compact window was left: its theme, and whether it was
+/// following the readings live.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(dead_code)]
+pub struct WindowLook {
+    pub dark: bool,
+    pub live: bool,
+}
+
 #[derive(Default, Serialize, Deserialize)]
 struct WindowState {
     #[serde(default)]
     port: u16,
+    /// The compact window's. It keeps the name it had when there was one
+    /// window, which opened at this size, so that window's place carries
+    /// over.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     place: Option<WindowPlace>,
+    /// The full dashboard's window.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    full: Option<WindowPlace>,
+    /// Vigil is dark unless told otherwise, and live unless paused, so
+    /// each is written only once it has been changed.
+    #[serde(default, skip_serializing_if = "is_false")]
+    light: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    paused: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 /// What ``window.json`` holds, or nothing remembered if it is missing or
@@ -335,8 +372,8 @@ fn remember_window_state(state: &WindowState) {
 }
 
 /// The local port the desktop window used last time, if any. Using the
-/// same one again keeps what the dashboard stores in the browser (theme,
-/// live or static mode), which is kept per address and port.
+/// same one again keeps what the dashboard stores in the browser (live or
+/// static mode, say), which is kept per address and port.
 pub fn window_port() -> Option<u16> {
     let port = window_state().port;
     (port != 0).then_some(port)
@@ -351,19 +388,47 @@ pub fn remember_window_port(port: u16) {
     }
 }
 
-/// Where the desktop window was when it was last closed, if it has been.
-// Only a build with the window (see window.rs) has one to place.
+/// Where a desktop window was when it was last closed, if it has been.
 #[allow(dead_code)]
-pub fn window_place() -> Option<WindowPlace> {
-    window_state().place
+pub fn window_place(kind: WindowKind) -> Option<WindowPlace> {
+    let state = window_state();
+    match kind {
+        WindowKind::Compact => state.place,
+        WindowKind::Full => state.full,
+    }
 }
 
-/// Remembers where the window is, so it opens there next time.
+/// Remembers where a window is, so it opens there next time.
 #[allow(dead_code)]
-pub fn remember_window_place(place: WindowPlace) {
+pub fn remember_window_place(kind: WindowKind, place: WindowPlace) {
     let mut state = window_state();
-    if state.place != Some(place) {
-        state.place = Some(place);
+    let slot = match kind {
+        WindowKind::Compact => &mut state.place,
+        WindowKind::Full => &mut state.full,
+    };
+    if *slot != Some(place) {
+        *slot = Some(place);
+        remember_window_state(&state);
+    }
+}
+
+/// How the compact window was left.
+#[allow(dead_code)]
+pub fn window_look() -> WindowLook {
+    let state = window_state();
+    WindowLook {
+        dark: !state.light,
+        live: !state.paused,
+    }
+}
+
+/// Remembers the theme and whether the window follows the readings live.
+#[allow(dead_code)]
+pub fn remember_window_look(look: WindowLook) {
+    let mut state = window_state();
+    if state.light == look.dark || state.paused == look.live {
+        state.light = !look.dark;
+        state.paused = !look.live;
         remember_window_state(&state);
     }
 }
@@ -402,11 +467,39 @@ mod tests {
         let state = WindowState {
             port: 4712,
             place: Some(place),
+            ..WindowState::default()
         };
         let back: WindowState =
             serde_json::from_str(&serde_json::to_string(&state).unwrap()).unwrap();
         assert_eq!(back.port, 4712);
         assert_eq!(back.place, Some(place));
+        assert_eq!(back.full, None);
+    }
+
+    #[test]
+    fn each_window_has_its_own_place_and_the_look_is_kept_too() {
+        let full = WindowPlace {
+            x: 10,
+            y: 20,
+            width: 1180,
+            height: 760,
+            maximized: false,
+        };
+        let state = WindowState {
+            port: 4712,
+            full: Some(full),
+            light: true,
+            paused: true,
+            ..WindowState::default()
+        };
+        let json = serde_json::to_string(&state).unwrap();
+        let back: WindowState = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.place, None);
+        assert_eq!(back.full, Some(full));
+        assert!(back.light && back.paused);
+        // Dark and live are what a file that says nothing means.
+        let quiet: WindowState = serde_json::from_str(r#"{"port":1}"#).unwrap();
+        assert!(!quiet.light && !quiet.paused);
     }
 
     #[test]

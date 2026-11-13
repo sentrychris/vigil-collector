@@ -77,6 +77,30 @@ wmi = { version = "0.18", default-features = false }
 # Windows 10 through Windows Update, so there is nothing to ship. MinGW
 # builds compile it but leave it out (see the window-on-mingw feature).
 wry = { version = "0.57", default-features = false }
+# The compact Vigil window (src/compact/), drawn without a browser: Slint
+# lays it out and paints it on the processor into a window the tray thread
+# makes itself. No windowing backend and no graphics stack are pulled in,
+# only the software renderer.
+slint = { version = "1.18", default-features = false, features = ["std", "compat-1-2", "renderer-software"] }
+
+# The compact window's layout is tested on every platform, though only
+# Windows opens it.
+[dev-dependencies]
+slint = { version = "1.18", default-features = false, features = ["std", "compat-1-2", "renderer-software"] }
+# Writes the previews that ``cargo test`` can leave behind (see the
+# README's "Development").
+png = "0.18"
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+# Slint's text layout asks the system for fonts through fontconfig. The
+# tests carry their own fonts, so this only says to look for the library
+# when a test runs instead of when it is built: ``cargo test`` then needs
+# no fontconfig headers installed. Keep the version the one Slint uses.
+fontique = { version = "0.11", features = ["fontconfig-dlopen"] }
+
+[build-dependencies]
+# Turns ui/*.slint into the Rust the compact window is built from.
+slint-build = "1.18"
 
 [features]
 # MinGW builds (x86_64-pc-windows-gnu) leave the Vigil window out, because

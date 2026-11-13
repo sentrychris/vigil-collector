@@ -5,7 +5,8 @@
  * minimise, maximise and close buttons and is what the window is dragged
  * by. The window gives the page `window.ipc.postMessage` to ask for those
  * (see src/window.rs in the collector), and sends a `vigil:window` event
- * whenever it is maximised or put back. In a browser there is no
+ * whenever it is maximised or put back. The page also says when its theme
+ * is changed, so the compact window can follow. In a browser there is no
  * `window.ipc`, `framed` is false and nothing here does anything.
  */
 import { readonly, ref } from "vue";
@@ -18,7 +19,9 @@ export type WindowAsk =
   | "drag"
   | "resize:top"
   | "resize:top-left"
-  | "resize:top-right";
+  | "resize:top-right"
+  | "theme:dark"
+  | "theme:light";
 
 interface Ipc {
   postMessage(message: string): void;
