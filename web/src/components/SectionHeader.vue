@@ -35,7 +35,7 @@ withDefaults(
   align-items: center;
   justify-content: space-between;
   padding: 0.6rem 1rem;
-  background: linear-gradient(135deg, #111827 0%, #1e293b 100%);
+  background: var(--header-grad);
   color: #f1f5f9;
   position: relative;
   overflow: hidden;

@@ -203,7 +203,7 @@ const node = computed(() => {
 
 <style scoped>
 .site-navbar {
-  background: linear-gradient(135deg, #111827 0%, #1e293b 100%);
+  background: var(--header-grad);
   color: #f1f5f9;
   position: sticky;
   top: 0;

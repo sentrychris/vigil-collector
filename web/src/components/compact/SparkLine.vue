@@ -12,6 +12,7 @@ import { HISTORY_LENGTH } from "@/stores/system";
 
 export interface SparkSeries {
   values: number[];
+  /** Any CSS colour, a theme variable included. */
   color: string;
 }
 
@@ -72,14 +73,14 @@ const paths = computed(() =>
     <title>{{ label }}</title>
     <defs>
       <linearGradient v-for="p in paths" :id="p.id" :key="p.id" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" :stop-color="p.color" stop-opacity="0.28" />
-        <stop offset="100%" :stop-color="p.color" stop-opacity="0" />
+        <stop offset="0%" :style="{ stopColor: p.color }" stop-opacity="0.28" />
+        <stop offset="100%" :style="{ stopColor: p.color }" stop-opacity="0" />
       </linearGradient>
     </defs>
     <template v-for="p in paths" :key="p.id">
       <template v-if="p.drawn">
         <path :d="p.fill" :fill="`url(#${p.id})`" />
-        <path class="spark-line" :d="p.stroke" :stroke="p.color" />
+        <path class="spark-line" :d="p.stroke" :style="{ stroke: p.color }" />
       </template>
     </template>
   </svg>

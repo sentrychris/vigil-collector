@@ -67,8 +67,8 @@ const diskIo = computed(() =>
 const rx = computed(() => rate(now.value.network?.rx_bytes_per_sec));
 const tx = computed(() => rate(now.value.network?.tx_bytes_per_sec));
 
-const RX = "#22d3ee";
-const TX = "#fb7185";
+const RX = "var(--t-cyan)";
+const TX = "var(--t-rose)";
 </script>
 
 <template>
@@ -101,7 +101,7 @@ const TX = "#fb7185";
       </template>
       <template #spark>
         <SparkLine
-          :series="[{ values: system.history.cpu, color: '#c084fc' }]"
+          :series="[{ values: system.history.cpu, color: 'var(--t-purple)' }]"
           :floor="25"
           label="CPU use over the last minute"
         />
@@ -121,7 +121,7 @@ const TX = "#fb7185";
       </template>
       <template #spark>
         <SparkLine
-          :series="[{ values: system.history.mem, color: '#fbbf24' }]"
+          :series="[{ values: system.history.mem, color: 'var(--t-amber)' }]"
           :max="100"
           label="Memory use over the last minute"
         />
@@ -142,7 +142,7 @@ const TX = "#fb7185";
       </template>
       <template #spark>
         <SparkLine
-          :series="[{ values: system.history.diskIo, color: '#34d399' }]"
+          :series="[{ values: system.history.diskIo, color: 'var(--t-green)' }]"
           :floor="1024 * 1024"
           label="Disk reads and writes over the last minute"
         />
@@ -206,17 +206,28 @@ const TX = "#fb7185";
      components. -->
 <style>
 .compact-root {
-  --c-surface: rgba(255, 255, 255, 0.78);
-  --c-border: rgba(15, 23, 42, 0.1);
+  --c-surface: var(--surface-glass);
+  --c-border: rgba(15, 23, 42, 0.08);
   --c-hair: rgba(15, 23, 42, 0.07);
   --c-track: rgba(15, 23, 42, 0.09);
-  --c-text: #111827;
-  --c-muted: #6b7280;
-  --c-dim: #9ca3af;
+  --c-text: #1e293b;
+  --c-muted: #64748b;
+  --c-dim: #8492a6;
   --c-accent: #2563eb;
   --c-ok: #059669;
   --c-warn: #d97706;
   --c-crit: #dc2626;
+  /* The accent of each card, its sparkline and its bar. On a light surface
+     these are a step deeper than in the dark theme, where the same hues
+     are lit up to stand out from near-black. */
+  --t-blue: #3b82f6;
+  --t-purple: #9a5cf0;
+  --t-amber: #d98a0b;
+  --t-green: #10a37a;
+  --t-cyan: #0e9bb8;
+  --t-rose: #e5486a;
+  --t-red: #e0484d;
+  --t-slate: #64748b;
 }
 body[data-theme="dark"] .compact-root {
   --c-surface: rgba(15, 23, 42, 0.6);
@@ -230,6 +241,14 @@ body[data-theme="dark"] .compact-root {
   --c-ok: #34d399;
   --c-warn: #fbbf24;
   --c-crit: #f87171;
+  --t-blue: #60a5fa;
+  --t-purple: #c084fc;
+  --t-amber: #fbbf24;
+  --t-green: #34d399;
+  --t-cyan: #22d3ee;
+  --t-rose: #fb7185;
+  --t-red: #f87171;
+  --t-slate: #cbd5e1;
 }
 
 .compact-root .compact-panel {
@@ -256,12 +275,12 @@ body[data-theme="dark"] .compact-root {
   height: 20px;
   border-radius: 6px;
   font-size: 10px;
-  color: #34d399;
+  color: var(--t-green);
   background: rgba(16, 185, 129, 0.15);
   box-shadow: inset 0 0 0 1px rgba(16, 185, 129, 0.25);
 }
 .compact-root .panel-icon.tone-red {
-  color: #f87171;
+  color: var(--t-red);
   background: rgba(239, 68, 68, 0.15);
   box-shadow: inset 0 0 0 1px rgba(239, 68, 68, 0.25);
 }

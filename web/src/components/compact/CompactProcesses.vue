@@ -188,7 +188,7 @@ th.col-num { padding-right: 10px; text-align: right; }
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: #34d399;
+  background: var(--t-green);
 }
 
 .sort-button {

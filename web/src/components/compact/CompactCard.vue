@@ -55,7 +55,7 @@ withDefaults(
 
 <style scoped>
 .compact-card {
-  --tone: #60a5fa;
+  --tone: var(--t-blue);
   --tone-soft: rgba(59, 130, 246, 0.15);
   --tone-edge: rgba(59, 130, 246, 0.25);
   padding: 7px 10px;
@@ -64,12 +64,12 @@ withDefaults(
   border: 1px solid var(--c-border);
   min-width: 0;
 }
-.tone-purple { --tone: #c084fc; --tone-soft: rgba(168, 85, 247, 0.15); --tone-edge: rgba(168, 85, 247, 0.25); }
-.tone-amber  { --tone: #fbbf24; --tone-soft: rgba(245, 158, 11, 0.15); --tone-edge: rgba(245, 158, 11, 0.25); }
-.tone-green  { --tone: #34d399; --tone-soft: rgba(16, 185, 129, 0.15); --tone-edge: rgba(16, 185, 129, 0.25); }
-.tone-cyan   { --tone: #22d3ee; --tone-soft: rgba(34, 211, 238, 0.14); --tone-edge: rgba(34, 211, 238, 0.25); }
-.tone-red    { --tone: #f87171; --tone-soft: rgba(239, 68, 68, 0.15);  --tone-edge: rgba(239, 68, 68, 0.25); }
-.tone-slate  { --tone: #cbd5e1; --tone-soft: rgba(148, 163, 184, 0.12); --tone-edge: rgba(148, 163, 184, 0.2); }
+.tone-purple { --tone: var(--t-purple); --tone-soft: rgba(168, 85, 247, 0.15); --tone-edge: rgba(168, 85, 247, 0.25); }
+.tone-amber  { --tone: var(--t-amber); --tone-soft: rgba(245, 158, 11, 0.15); --tone-edge: rgba(245, 158, 11, 0.25); }
+.tone-green  { --tone: var(--t-green); --tone-soft: rgba(16, 185, 129, 0.15); --tone-edge: rgba(16, 185, 129, 0.25); }
+.tone-cyan   { --tone: var(--t-cyan); --tone-soft: rgba(34, 211, 238, 0.14); --tone-edge: rgba(34, 211, 238, 0.25); }
+.tone-red    { --tone: var(--t-red); --tone-soft: rgba(239, 68, 68, 0.15);  --tone-edge: rgba(239, 68, 68, 0.25); }
+.tone-slate  { --tone: var(--t-slate); --tone-soft: rgba(148, 163, 184, 0.12); --tone-edge: rgba(148, 163, 184, 0.2); }
 
 .card-row {
   display: flex;

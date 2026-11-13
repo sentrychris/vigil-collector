@@ -895,12 +895,12 @@ watch(
 /* The palette tokens exist only in the dark theme (see dark.scss); each
    one here falls back to its light counterpart. */
 .settings-root {
-  --s-text: var(--text-primary, #0f172a);
+  --s-text: var(--text-primary, #1e293b);
   --s-text-2: var(--text-secondary, #334155);
   --s-muted: var(--text-muted, #64748b);
   --s-border: var(--border-default, rgba(15, 23, 42, 0.16));
   --s-rule: var(--border-subtle, rgba(15, 23, 42, 0.08));
-  --s-input: var(--bg-input, #ffffff);
+  --s-input: var(--bg-input, #f8fafc);
   --s-hover: var(--bg-hover, rgba(15, 23, 42, 0.05));
   --s-accent: var(--accent-blue, #2563eb);
   --s-ok: var(--status-ok, #047857);

@@ -176,7 +176,7 @@ function relTime(ts: number | null): string {
 
 /* ---------- Rows ---------- */
 .service-list {
-  background: #ffffff;
+  background: var(--surface);
 }
 
 .service-row {
