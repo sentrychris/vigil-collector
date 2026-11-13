@@ -91,6 +91,13 @@ slint = { version = "1.18", default-features = false, features = ["std", "compat
 # README's "Development").
 png = "0.18"
 
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+# Slint's text layout asks the system for fonts through fontconfig. The
+# tests carry their own fonts, so this only says to look for the library
+# when a test runs instead of when it is built: ``cargo test`` then needs
+# no fontconfig headers installed. Keep the version the one Slint uses.
+fontique = { version = "0.11", features = ["fontconfig-dlopen"] }
+
 [build-dependencies]
 # Turns ui/*.slint into the Rust the compact window is built from.
 slint-build = "1.18"

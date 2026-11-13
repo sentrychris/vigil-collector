@@ -112,7 +112,7 @@ mod tests {
         // and nowhere is it far from the page colour.
         let glowing = at(&picture, width, 42, 35);
         assert!(glowing[2] > PAGE_DARK[2] + 30, "{glowing:?}");
-        for pixel in picture.chunks_exact(3) {
+        for pixel in picture.as_chunks::<3>().0 {
             assert!(
                 pixel
                     .iter()
