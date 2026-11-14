@@ -8,8 +8,12 @@ mod frame;
 mod ico;
 mod log;
 mod metrics;
+#[cfg(any(windows, test))]
+mod native;
 mod sampler;
 mod server;
+#[cfg(any(windows, test))]
+mod settings;
 mod snapshot;
 mod supervisor;
 #[cfg(windows)]
@@ -28,7 +32,7 @@ use clap::Parser;
 use tokio::sync::{Notify, mpsc};
 
 use crate::cli::Cli;
-use crate::server::control::Control;
+use crate::server::control::{Control, Panel};
 use crate::supervisor::{Command, Supervisor};
 
 /// The most live dashboards the desktop window's own listener serves.
@@ -100,7 +104,7 @@ async fn main() -> anyhow::Result<()> {
     let search = false;
 
     // Open WebSocket sessions on the public server, shared with the tray
-    // menu and the Settings page.
+    // menu and Settings.
     let active_ws = Arc::new(AtomicUsize::new(0));
     let mut supervisor = Supervisor::new(
         settings,
@@ -116,8 +120,17 @@ async fn main() -> anyhow::Result<()> {
     let listener = supervisor.bind().await?;
     supervisor.start_sampler()?;
 
-    // Requests from the tray menu and the Settings page.
+    // Requests from the tray menu and Settings.
     let (commands, mut requests) = mpsc::unbounded_channel::<Command>();
+    // What Settings shows and changes, whether it is Vigil's own window
+    // or the page in the full dashboard's.
+    let panel = Panel {
+        commands: commands.clone(),
+        status: supervisor.status(),
+        active_ws: active_ws.clone(),
+        max_ws: supervisor.max_ws(),
+        started: Instant::now(),
+    };
 
     // The desktop window's private listener, with the control API.
     let window = private_listener(tray_mode && HAS_WINDOW).await;
@@ -135,11 +148,7 @@ async fn main() -> anyhow::Result<()> {
                 control: Some(Control {
                     token: token.into(),
                     port,
-                    commands: commands.clone(),
-                    status: supervisor.status(),
-                    active_ws: active_ws.clone(),
-                    max_ws: supervisor.max_ws(),
-                    started: Instant::now(),
+                    panel: panel.clone(),
                 }),
             };
             let stop = window_stop.clone();
@@ -151,8 +160,8 @@ async fn main() -> anyhow::Result<()> {
         None => None,
     };
 
-    // The tray menu and the Settings page can start the server again, so
-    // with either of them the process stays when the server stops.
+    // The tray menu and Settings can start the server again, so with
+    // either of them the process stays when the server stops.
     if tray_mode || window_task.is_some() {
         supervisor.stay_up();
     }
@@ -171,7 +180,12 @@ async fn main() -> anyhow::Result<()> {
                 None
             }
         };
-        match tray::Tray::start(url, commands.clone(), active_ws.clone(), feed, window) {
+        let own = tray::Windows {
+            feed,
+            panel: panel.clone(),
+            full: window,
+        };
+        match tray::Tray::start(url, commands.clone(), active_ws.clone(), own) {
             Ok(tray) => Some(tray),
             Err(e) => {
                 tracing::warn!("No tray icon: {e}");
@@ -185,12 +199,13 @@ async fn main() -> anyhow::Result<()> {
     let _ = (&window_endpoint, tray_mode);
     // From here only the tray and the control API hold a sender, so with
     // neither of them the supervisor waits on signals alone.
+    drop(panel);
     drop(commands);
 
     supervisor.serve_on(listener)?;
 
     // Keep the tray's tooltip, menu and window title on the address in
-    // use, which the Settings page can change.
+    // use, which Settings can change.
     #[cfg(windows)]
     if let Some(tray) = &tray {
         let handle = tray.handle();

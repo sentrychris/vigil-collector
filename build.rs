@@ -1,9 +1,10 @@
 //! Builds the two things the binary embeds: the Vue dashboard in ``web/``,
-//! and the compact window's layout in ``ui/``.
+//! and the layouts of Vigil's own windows in ``ui/``.
 //!
-//! The layout is written in Slint's own language (``ui/compact.slint``).
-//! Slint's compiler turns it into Rust here, with the fonts it names built
-//! in, and ``src/compact/mod.rs`` includes the result.
+//! The layouts are written in Slint's own language (``ui/vigil.slint`` and
+//! the files it names). Slint's compiler turns them into Rust here, with
+//! the fonts they name built in, and ``src/native/mod.rs`` includes the
+//! result.
 //!
 //! For the dashboard, Cargo reruns this only when a source file changes, and Vite
 //! writes the result to ``web/dist``, which ``src/server/http.rs`` embeds.
@@ -30,7 +31,7 @@ const WATCH: &[&str] = &[
 ];
 
 fn main() {
-    compact_window();
+    own_windows();
 
     for path in WATCH {
         println!("cargo:rerun-if-changed={path}");
@@ -66,15 +67,15 @@ fn main() {
     }
 }
 
-/// Turns the compact window's layout (``ui/compact.slint``) into Rust for
-/// ``src/compact/`` to include, with its fonts built into the program.
-/// Done for every target, though only Windows has the window: the tests
-/// draw it on all of them.
-fn compact_window() {
+/// Turns the layouts of the compact window and Settings (``ui/``) into
+/// Rust for ``src/native/`` to include, with their fonts built into the
+/// program. Done for every target, though only Windows has the windows:
+/// the tests draw them on all of them.
+fn own_windows() {
     let config = slint_build::CompilerConfiguration::new()
         .embed_resources(slint_build::EmbedResourcesKind::EmbedFiles);
-    if let Err(e) = slint_build::compile_with_config("ui/compact.slint", config) {
-        eprintln!("\nerror: building the compact window: {e}\n");
+    if let Err(e) = slint_build::compile_with_config("ui/vigil.slint", config) {
+        eprintln!("\nerror: building Vigil's windows: {e}\n");
         std::process::exit(1);
     }
 }

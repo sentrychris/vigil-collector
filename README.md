@@ -178,15 +178,15 @@ any target. The `x86_64-pc-windows-msvc` target can't be cross-compiled from Lin
 way (ring needs `clang-cl` for it). Build MSVC binaries on Windows, or use
 the GNU target above.
 
-The one difference is the window for the full dashboard and Settings (see
+The one difference is the window for the full dashboard (see
 [The Vigil window](#the-vigil-window)). The MSVC build links the WebView2
 loader into the exe. MinGW can't, and would need `WebView2Loader.dll`
 beside the exe to start at all, so a MinGW build leaves that window out
-and stays one file: the full dashboard opens in the browser and Settings
-opens the settings file instead. The compact window, which needs no
-WebView2, is in every Windows build. To have the other in a MinGW build
-too, add `--features window-on-mingw` and ship `WebView2Loader.dll` (from
-the WebView2 SDK) next to the exe.
+and stays one file: the full dashboard opens in the browser instead. The
+compact window and Settings, which need no WebView2, are in every Windows
+build. To have the other in a MinGW build too, add
+`--features window-on-mingw` and ship `WebView2Loader.dll` (from the
+WebView2 SDK) next to the exe.
 
 ## Running
 
@@ -226,7 +226,7 @@ compact dashboard. Right-click it for a menu:
 - **Open Vigil** shows the window. **Full dashboard** opens the dashboard
   with its charts in a window of its own, and **Open in browser** opens
   that in your browser instead.
-- **Settings** opens the [Settings page](#the-vigil-window).
+- **Settings** opens the [Settings window](#the-vigil-window).
 - How many dashboards are connected, and the address.
 - **Stop serving** closes the server to browsers and other devices while
   Vigil keeps monitoring and the window keeps working. **Start serving**
@@ -259,7 +259,7 @@ opens the running copy's window instead (double-clicked), or prints
 where it's running and exits (from a terminal, or with `--foreground`).
 
 In the tray, the log is written to the log file (see
-[Configuration](#configuration)) and shown on the Settings page.
+[Configuration](#configuration)) and shown in Settings.
 
 ### The Vigil window
 
@@ -282,12 +282,12 @@ The button beside the close button opens the **full dashboard**, with its
 charts and tables, in a second window. That one is the same page a
 browser gets, drawn by the WebView2 runtime that comes with Windows 10
 and 11, and it exists only while it is open. On a machine without
-WebView2, the full dashboard opens in the browser and Settings opens the
-settings file in your editor instead.
+WebView2, the full dashboard opens in the browser instead.
 
-The gear in either window's top bar opens **Settings**, in the second
-window. Only that window has it (a browser never sees it, on this
-computer or another):
+The gear in either window's top bar, or **Settings** in the tray menu,
+opens **Settings**: a small window of its own that Vigil draws itself,
+like the compact one and in its style, with a tab for each of these (a
+browser never sees any of it, on this computer or another):
 
 - **Server**: stop, start and restart it, choose who can connect (this
   computer only, any device on the network, or one address) and the port.
@@ -296,16 +296,20 @@ computer or another):
 - **Connections**: how many live viewers are connected, the limit, and how
   often readings are taken.
 - **Logs**: what Vigil has logged since it started, live, with the level
-  and the on/off switch.
+  and the on/off switch. Scrolling up holds it still; back at the end it
+  follows again.
 - **Service checks**: the addresses the dashboard's Services panel checks.
 - **About**: the version, where the settings and log files are, and
   **Quit Vigil**.
 
-Everything on the page is saved to the [settings file](#configuration) and
-takes effect without a restart. That window talks to Vigil over its own
-listener on `127.0.0.1`, on a port other than the server's, which needs a
-key made afresh each time Vigil starts. The server other devices reach has
-no settings API at all.
+Everything in it is saved to the [settings file](#configuration) and
+takes effect without a restart. The text fields are ordinary ones: Tab
+moves between them, Enter saves, and Ctrl+A, C, X, V and Z do what they do
+everywhere. The window is part of Vigil itself and changes it directly.
+The full dashboard's window talks to Vigil over its own listener on
+`127.0.0.1`, on a port other than the server's, which needs a key made
+afresh each time Vigil starts. The server other devices reach has no
+settings API at all.
 
 ## Running in the background
 
@@ -427,7 +431,7 @@ Example:
 ```
 
 - `--address` and `--port` override the file at startup, until a different
-  one is saved on the [Settings page](#the-vigil-window).
+  one is saved in [Settings](#the-vigil-window).
 - `RUST_LOG` (e.g. `RUST_LOG=vigil_collector=debug`) overrides `log_level`.
 - `NO_COLOR=1` turns off coloured console output. Colour is also off
   automatically when output isn't a terminal (a file, journald, a pipe).
@@ -437,7 +441,7 @@ Example:
 - The probe list is re-read on every `/probes` request, so it can be
   changed without a restart. Other edits to the file take effect at the
   next start, or straight away with **Restart** in the tray menu. Changes
-  made on the [Settings page](#the-vigil-window) are written to the file
+  made in [Settings](#the-vigil-window) are written to the file
   and apply at once.
 - The log file is started again when it reaches 4 MiB.
 
@@ -615,11 +619,12 @@ paths to Vigil on `127.0.0.1:4500`, so run it alongside
 `VIGIL_SKIP_WEB_BUILD=1` to make `cargo build` reuse an existing
 `web/dist` instead of rebuilding it.
 
-The Settings page and the API behind it (`/control/...`, see
+The same settings also exist as a page of the web dashboard, over an API
+(`/control/...`, see
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#the-window-and-the-control-api))
-normally exist only for the Vigil window on Windows. To work on them on
-any platform, give the collector a port and a key for that listener, and
-give `npm run dev` the same two:
+that normally exists only for the full dashboard's window on Windows. To
+work on them on any platform, give the collector a port and a key for that
+listener, and give `npm run dev` the same two:
 
 ```sh
 VIGIL_CONTROL_PORT=4501 VIGIL_CONTROL_TOKEN=dev cargo run
@@ -634,8 +639,8 @@ then starts the release binary and checks that `/system`, `/network`,
 `/worker` and the dashboard (page and assets) respond, and that the
 settings API does not. Platform-specific code lives behind `#[cfg(...)]` in
 `src/metrics/`, `src/log.rs`, `src/tray.rs`, `src/frame.rs`,
-`src/window.rs` and `src/compact/host.rs`; if you
-change it, cross-check the other targets:
+`src/window.rs`, `src/native/shell.rs`, `src/compact/host.rs` and
+`src/settings/host.rs`; if you change it, cross-check the other targets:
 
 ```sh
 cargo clippy --all-targets --target x86_64-pc-windows-gnu -- -D warnings
@@ -643,13 +648,16 @@ cargo clippy --all-targets --target x86_64-pc-windows-gnu -- -D warnings
 cargo clippy --all-targets --target x86_64-pc-windows-gnu --features window-on-mingw -- -D warnings
 ```
 
-The compact window's layout is [ui/compact.slint](ui/compact.slint), and
-the code that feeds and shows it is in `src/compact/`. Only Windows opens
-the window, but its tests draw it on every platform, without a screen. To
-see what a change looks like, have them save what they draw:
+The compact window's layout is [ui/compact.slint](ui/compact.slint) and
+Settings' is [ui/settings.slint](ui/settings.slint); the code that feeds
+and shows them is in `src/compact/` and `src/settings/`, on top of what
+they share in `src/native/`. Only Windows opens the windows, but their
+tests draw them on every platform, without a screen, and press and type
+on them. To see what a change looks like, have them save what they draw:
 
 ```sh
-VIGIL_PREVIEW_DIR=/tmp/vigil cargo test compact   # writes /tmp/vigil/compact-*.png
+VIGIL_PREVIEW_DIR=/tmp/vigil cargo test compact    # writes /tmp/vigil/compact-*.png
+VIGIL_PREVIEW_DIR=/tmp/vigil cargo test settings   # writes /tmp/vigil/settings-*.png
 ```
 
 Contributor docs, including the full data flow and runtime model, are in

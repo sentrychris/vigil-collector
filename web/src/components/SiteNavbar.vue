@@ -83,9 +83,22 @@ const node = computed(() => {
 
           <span class="control-divider" aria-hidden="true"></span>
 
-          <!-- Settings: only in the Vigil window -->
+          <!-- Settings: only in the Vigil window, where it is a window
+               of its own that the collector opens. -->
+          <button
+            v-if="control.available && frame.framed.value && $route.name !== 'settings'"
+            type="button"
+            class="nav-button"
+            title="Settings"
+            aria-label="Settings"
+            @click="frame.ask('settings')"
+          >
+            <font-awesome-icon icon="fa-solid fa-gear" />
+          </button>
+          <!-- The same settings as a page, where there is no such window
+               to ask for. -->
           <RouterLink
-            v-if="control.available"
+            v-else-if="control.available"
             class="nav-button"
             :to="$route.name === 'settings' ? '/' : '/settings'"
             :title="$route.name === 'settings' ? 'Back to the dashboard' : 'Settings'"
@@ -319,6 +332,12 @@ const node = computed(() => {
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.1);
   transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+/* As a button rather than a link, it brings padding of its own. */
+button.nav-button {
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
 }
 .nav-button:hover,
 .nav-button:focus-visible {

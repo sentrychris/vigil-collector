@@ -22,8 +22,8 @@ use self::worker::WorkerRegistry;
 pub struct AppState {
     pub sampler_json: Arc<CachedJson>,
     pub workers: Arc<WorkerRegistry>,
-    /// The cap on open WebSocket sessions. Read at each connection, so the
-    /// Settings page can change it while the server runs.
+    /// The cap on open WebSocket sessions. Read at each connection, so
+    /// Settings can change it while the server runs.
     pub max_ws: Arc<AtomicUsize>,
     /// Milliseconds between WebSocket frames (the sampler's tick). Read
     /// before each frame for the same reason.
@@ -168,7 +168,7 @@ pub struct Serve {
     pub push_interval_ms: Arc<AtomicU64>,
     pub max_ws: Arc<AtomicUsize>,
     /// Open WebSocket sessions (dashboards watching live). The caller owns
-    /// it so the tray menu and the Settings page can show it.
+    /// it so the tray menu and Settings can show it.
     pub active_ws: Arc<AtomicUsize>,
     /// Set for the desktop window's private listener, which also serves
     /// the control API.

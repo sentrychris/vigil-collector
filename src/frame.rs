@@ -1,7 +1,8 @@
-//! What Vigil's two desktop windows have in common: the compact one
-//! (``compact/``) and the one with the full dashboard (``window.rs``).
+//! What Vigil's desktop windows have in common: the ones it draws itself
+//! (``native/shell.rs``: the compact dashboard and Settings) and the one
+//! with the full dashboard (``window.rs``).
 //!
-//! Neither has a title bar from Windows. Each draws its own top bar and
+//! None has a title bar from Windows. Each draws its own top bar and
 //! leaves the rest of the frame to Windows: the resize borders at the
 //! sides and bottom, the shadow and the rounded corners. Each also opens
 //! where it was last closed.

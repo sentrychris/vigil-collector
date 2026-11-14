@@ -1,11 +1,12 @@
-//! The window for the full dashboard and the Settings page.
+//! The window for the full dashboard.
 //!
 //! One window with a WebView2 control filling it, showing the same
 //! dashboard a browser would. It loads from the tray process's private
-//! listener (see ``server::control``), which is also the only place the
-//! Settings page is served. The window the tray icon opens is a different
-//! one, the compact dashboard, which is drawn without a browser
-//! (``compact/``) and has a button that opens this one.
+//! listener (see ``server::control``). The window the tray icon opens is
+//! a different one, the compact dashboard, which is drawn without a
+//! browser (``compact/``) and has a button that opens this one. Settings
+//! is a third, drawn the same way (``settings/``); the gear in this
+//! window's bar asks for it.
 //!
 //! The window has no title bar of its own. The dashboard's top bar takes
 //! its place: it draws the minimise, maximise and close buttons and is
@@ -61,10 +62,6 @@ const MIN_SIZE: (i32, i32) = (360, 300);
 /// The dashboard's dark page colour, shown until the page has drawn so
 /// the window doesn't flash white.
 const BACKGROUND: (u8, u8, u8, u8) = (0x0a, 0x0e, 0x17, 0xff);
-/// Asks the page already showing to go to Settings, without loading it
-/// again (``App.vue`` listens for this).
-const GO_TO_SETTINGS: &str =
-    "window.dispatchEvent(new CustomEvent('vigil:navigate', { detail: '/settings' }))";
 
 /// Posted to the window by the page's title bar, with an ``Ask`` in
 /// ``wparam``. Posted rather than acted on at once because the request
@@ -94,10 +91,13 @@ enum Ask {
     ResizeTop,
     ResizeTopLeft,
     ResizeTopRight,
+    /// The gear was pressed: open Settings, which is a window of its own
+    /// (``settings/``).
+    Settings,
 }
 
 impl Ask {
-    const ALL: [Ask; 8] = [
+    const ALL: [Ask; 9] = [
         Ask::State,
         Ask::Minimize,
         Ask::Maximize,
@@ -106,6 +106,7 @@ impl Ask {
         Ask::ResizeTop,
         Ask::ResizeTopLeft,
         Ask::ResizeTopRight,
+        Ask::Settings,
     ];
 
     /// The word the page sends for it.
@@ -119,6 +120,7 @@ impl Ask {
             Ask::ResizeTop => "resize:top",
             Ask::ResizeTopLeft => "resize:top-left",
             Ask::ResizeTopRight => "resize:top-right",
+            Ask::Settings => "settings",
         }
     }
 
@@ -159,13 +161,6 @@ fn start_in_theme(dark: bool) -> String {
     )
 }
 
-/// Which page the window should be showing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Page {
-    Dashboard,
-    Settings,
-}
-
 struct Window {
     hwnd: HWND,
     webview: WebView,
@@ -195,33 +190,26 @@ impl HasWindowHandle for Parent {
     }
 }
 
-/// Shows the window on ``page``, creating it if it isn't open, and brings
-/// it to the front. ``origin`` is the private listener
+/// Shows the window, creating it if it isn't open, and brings it to the
+/// front. ``origin`` is the private listener
 /// (``http://127.0.0.1:<port>``) and ``token`` its secret for this run.
 /// An error means there is no window to show (most likely no WebView2 on
 /// this computer) and the caller should fall back to the browser.
-pub fn show(origin: &str, token: &str, page: Page) -> Result<(), String> {
+pub fn show(origin: &str, token: &str) -> Result<(), String> {
     let existing = WINDOW.with_borrow(|w| w.as_ref().map(|w| w.hwnd));
     if let Some(hwnd) = existing {
-        if page == Page::Settings {
-            WINDOW.with_borrow(|w| {
-                if let Some(w) = w {
-                    let _ = w.webview.evaluate_script(GO_TO_SETTINGS);
-                }
-            });
-        }
         frame::bring_forward(hwnd);
         return Ok(());
     }
     if CREATING.replace(true) {
         return Ok(());
     }
-    let result = create(origin, token, page);
+    let result = create(origin, token);
     CREATING.set(false);
     result
 }
 
-fn create(origin: &str, token: &str, page: Page) -> Result<(), String> {
+fn create(origin: &str, token: &str) -> Result<(), String> {
     // SAFETY: plain Win32 calls on this thread, with NUL-terminated strings
     // that outlive them.
     let (hwnd, icons, maximized) = unsafe {
@@ -262,7 +250,7 @@ fn create(origin: &str, token: &str, page: Page) -> Result<(), String> {
         (hwnd, frame::set_icons(hwnd), maximized)
     };
 
-    match webview(hwnd, origin, token, page) {
+    match webview(hwnd, origin, token) {
         Ok(webview) => {
             WINDOW.set(Some(Window {
                 hwnd,
@@ -323,6 +311,7 @@ unsafe fn page_asked(hwnd: HWND, ask: Ask) {
             Ask::ResizeTop => begin_move_or_size(hwnd, HTTOP),
             Ask::ResizeTopLeft => begin_move_or_size(hwnd, HTTOPLEFT),
             Ask::ResizeTopRight => begin_move_or_size(hwnd, HTTOPRIGHT),
+            Ask::Settings => crate::tray::open_settings(),
         }
     }
 }
@@ -407,13 +396,10 @@ fn show_page(shown: bool) {
 
 /// Makes the WebView2 control inside ``hwnd`` and points it at the
 /// private listener. Its first address carries the token, which the
-/// listener swaps for a session cookie before sending it on to ``page``.
-fn webview(hwnd: HWND, origin: &str, token: &str, page: Page) -> Result<WebView, String> {
-    let next = match page {
-        Page::Dashboard => "",
-        Page::Settings => "&next=settings",
-    };
-    let url = format!("{origin}/control/session?token={token}{next}");
+/// listener swaps for a session cookie before sending it on to the
+/// dashboard.
+fn webview(hwnd: HWND, origin: &str, token: &str) -> Result<WebView, String> {
+    let url = format!("{origin}/control/session?token={token}");
 
     // Links that leave the dashboard (the footer's, say) open in the
     // default browser rather than inside the window.

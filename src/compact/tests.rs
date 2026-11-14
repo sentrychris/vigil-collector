@@ -4,15 +4,15 @@
 //! ``ui/compact.slint`` without a Windows machine.
 
 use std::cell::RefCell;
-use std::path::PathBuf;
 use std::rc::Rc;
 
 use slint::platform::{PointerEventButton, WindowEvent};
 use slint::{ComponentHandle, LogicalPosition};
 
-use super::surface::{self, Frame, Surface};
-use super::ui::{Charts, CompactWindow, Theme};
 use super::view::{self, History};
+use crate::native::surface::{self, Frame, Surface};
+use crate::native::ui::{Charts, CompactWindow, Theme};
+use crate::native::{self, save_preview};
 use crate::server::probes::ProbeResult;
 use crate::snapshot::{Process, ProcessCpu, Snapshot};
 
@@ -115,7 +115,7 @@ impl Shown {
     /// The window after a minute of readings, at ``width`` by ``height``
     /// layout pixels and ``scale`` real pixels to each.
     fn new(width: u32, height: u32, scale: f32, dark: bool) -> Shown {
-        let (ui, surface) = surface::open().expect("the layout can be made");
+        let (ui, surface) = surface::open(CompactWindow::new).expect("the layout can be made");
         let history = Rc::new(RefCell::new(History::default()));
         view::draw_from(&ui, &history);
         ui.global::<Theme>().set_dark(dark);
@@ -125,7 +125,7 @@ impl Shown {
             (height as f32 * scale) as u32,
         );
         surface.resize(real_width, real_height, scale);
-        view::paint_page(&ui, real_width, real_height, scale);
+        native::paint_page(&ui, real_width, real_height, scale);
         let mut shown = Shown {
             ui,
             surface,
@@ -173,23 +173,7 @@ impl Shown {
 
     /// Saves the picture as ``name``.png in ``VIGIL_PREVIEW_DIR``, if set.
     fn save(&self, name: &str) {
-        let Some(dir) = std::env::var_os("VIGIL_PREVIEW_DIR") else {
-            return;
-        };
-        let path = PathBuf::from(dir).join(format!("{name}.png"));
-        let file = std::fs::File::create(&path).expect("the preview folder can be written to");
-        let mut encoder = png::Encoder::new(
-            std::io::BufWriter::new(file),
-            self.frame.width,
-            self.frame.height,
-        );
-        encoder.set_color(png::ColorType::Rgb);
-        encoder.set_depth(png::BitDepth::Eight);
-        let bytes: Vec<u8> = self.frame.pixels.iter().flat_map(|p| p.rgb()).collect();
-        encoder
-            .write_header()
-            .and_then(|mut writer| writer.write_image_data(&bytes))
-            .expect("the preview can be written");
+        save_preview(&self.frame, name);
     }
 }
 

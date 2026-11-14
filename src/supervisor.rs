@@ -7,7 +7,7 @@
 //! The supervisor owns everything that can change while Vigil runs:
 //!
 //! - the public listener, which is closed and opened again by the tray
-//!   menu and the Settings page;
+//!   menu and Settings;
 //! - the sampler, which keeps ticking throughout (the window still shows
 //!   live data while the public server is stopped);
 //! - the settings that apply live: the connection cap, the tick rate and
@@ -31,7 +31,7 @@ use crate::sampler::{CachedJson, Sampler};
 use crate::server::{self, Serve};
 
 /// How a command's sender hears whether it worked. The error is a
-/// sentence fit to show on the Settings page.
+/// sentence fit to show in Settings.
 pub type Reply = oneshot::Sender<Result<(), String>>;
 
 pub enum Command {
@@ -55,7 +55,7 @@ pub enum Command {
     Quit,
 }
 
-/// What the tray menu and the Settings page show about the public server.
+/// What the tray menu and Settings show about the public server.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct Status {
     pub serving: bool,
@@ -88,7 +88,7 @@ pub struct Supervisor {
     cli_address: Option<String>,
     cli_port: Option<u16>,
     /// A taken port may be swapped for the next free one (Windows,
-    /// double-clicked, until a port is chosen on the Settings page).
+    /// double-clicked, until a port is chosen in Settings).
     search: bool,
     /// Whether the process outlives the server. With a tray icon it does:
     /// the menu can start it again. Without one, a server that stops by
@@ -455,7 +455,7 @@ fn answer(reply: Option<Reply>, result: Result<(), String>) {
     }
 }
 
-/// An error message as a sentence for the Settings page: capitalised,
+/// An error message as a sentence for Settings: capitalised,
 /// with a full stop.
 fn sentence(message: &str) -> String {
     let mut chars = message.trim().chars();

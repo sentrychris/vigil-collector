@@ -1,0 +1,231 @@
+// What Vigil's own windows are made from: the compact dashboard
+// (compact.slint) and Settings (settings.slint). The fonts, the colours
+// of each theme and the small parts both are built with, so the two look
+// like one program.
+
+import "fonts/Montserrat-500.ttf";
+import "fonts/Montserrat-600.ttf";
+import "fonts/Montserrat-700.ttf";
+import "fonts/IBMPlexMono-400.ttf";
+import "fonts/IBMPlexMono-600.ttf";
+import "fonts/IBMPlexMono-700.ttf";
+import "fonts/Lato-300.ttf";
+
+import { Glyph, Icons } from "icons.slint";
+import { Logo } from "logo.slint";
+
+// ─── Colours ───────────────────────────────────────────────────────────
+// The compact dashboard's palette in each theme (CompactDashboard.vue),
+// and what the Settings window adds to it (SettingsView.vue).
+
+export global Theme {
+    in property <bool> dark: true;
+    out property <color> page: dark ? #0a0e17 : #e1e6ed;
+    out property <color> surface: dark ? #0f172a99 : #f0f3f8bd;
+    out property <color> border: dark ? #94a3b824 : #0f172a14;
+    out property <color> hair: dark ? #94a3b817 : #0f172a12;
+    out property <color> track: dark ? #94a3b824 : #0f172a17;
+    out property <color> text: dark ? #f1f5f9 : #1e293b;
+    out property <color> muted: dark ? #94a3b8 : #64748b;
+    out property <color> dim: dark ? #64748b : #8492a6;
+    out property <color> accent: dark ? #60a5fa : #2563eb;
+    out property <color> ok: dark ? #34d399 : #059669;
+    out property <color> warn: dark ? #fbbf24 : #d97706;
+    out property <color> crit: dark ? #f87171 : #dc2626;
+    // The accent of each card, its sparkline and its bar.
+    out property <color> blue: dark ? #60a5fa : #3b82f6;
+    out property <color> purple: dark ? #c084fc : #9a5cf0;
+    out property <color> amber: dark ? #fbbf24 : #d98a0b;
+    out property <color> green: dark ? #34d399 : #10a37a;
+    out property <color> cyan: dark ? #22d3ee : #0e9bb8;
+    out property <color> rose: dark ? #fb7185 : #e5486a;
+    out property <color> red: dark ? #f87171 : #e0484d;
+    // The title bar is dark in both themes, a shade lighter in the light one.
+    out property <color> bar-from: dark ? #111827 : #1c2638;
+    out property <color> bar-to: dark ? #1e293b : #2d3b51;
+    out property <color> scroll-thumb: dark ? #94a3b83d : #0f172a38;
+    out property <color> scroll-thumb-hover: dark ? #94a3b873 : #0f172a66;
+    // The Settings window's fields and buttons.
+    out property <color> soft: dark ? #cbd5e1 : #334155;
+    out property <color> field: dark ? #ffffff0d : #f8fafc;
+    out property <color> field-border: dark ? #94a3b829 : #0f172a29;
+    out property <color> hover: dark ? #ffffff0a : #0f172a0d;
+    out property <color> primary: #2563eb;
+    out property <color> primary-hover: #1d4ed8;
+    out property <color> selection: dark ? #3b82f666 : #2563eb40;
+}
+
+export global Type {
+    out property <string> mono: "IBM Plex Mono";
+    out property <string> mono-semibold: "IBM Plex Mono SemiBold";
+    out property <string> figures: "Lato Light";
+}
+
+// The page behind the cards (src/native/backdrop.rs), painted for the
+// window's size and theme whenever either changes.
+export global Page {
+    in property <image> picture;
+}
+
+// ─── Small parts ──────────────────────────────────────────────────────
+
+export component Icon inherits Path {
+    in property <Glyph> glyph;
+    in property <length> size: 12px;
+    width: self.size * self.glyph.w / 512;
+    height: self.size;
+    viewbox-width: self.glyph.w;
+    viewbox-height: 512;
+    commands: self.glyph.d;
+}
+
+// A soft round glow: `tint` at the centre, fading to nothing `radius`
+// away. (Slint measures a radial gradient to the corner of its box, hence
+// the 70.7%: the edge of a square is that far along.) Only for what is
+// seldom repainted, like the bar: see Backdrop.
+export component Glow inherits Rectangle {
+    in property <length> cx;
+    in property <length> cy;
+    in property <length> radius;
+    in property <color> tint;
+    x: self.cx - self.radius;
+    y: self.cy - self.radius;
+    width: self.radius * 2;
+    height: self.radius * 2;
+    background: @radial-gradient(circle, self.tint 0%, self.tint.with-alpha(0) 70.7%);
+}
+
+// The page behind everything: the page colour with the web dashboard's
+// ambient glows in its accent tones. The glows are painted in Rust
+// (src/native/backdrop.rs) and shown as one picture, because as
+// gradients here they would be worked out again for every pixel of every
+// repaint.
+export component Backdrop inherits Rectangle {
+    background: Theme.page;
+    Image {
+        width: 100%;
+        height: 100%;
+        image-fit: fill;
+        source: Page.picture;
+    }
+}
+
+// A thin rounded track with a filled share, from 0 to 100.
+export component Meter inherits Rectangle {
+    in property <float> share;
+    in property <color> tone;
+    border-radius: self.height / 2;
+    background: Theme.track;
+    Rectangle {
+        x: 0;
+        width: parent.width * clamp(root.share, 0, 100) / 100;
+        border-radius: parent.border-radius;
+        background: root.tone;
+    }
+}
+
+// The small square behind a card's or a panel's picture.
+export component Tile inherits Rectangle {
+    in property <color> tint;
+    border-radius: self.width > 22px ? 7px : 6px;
+    background: self.tint.with-alpha(0.15);
+    border-width: 1px;
+    border-color: self.tint.with-alpha(0.25);
+}
+
+export component PanelTitle inherits Text {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.99px;
+    color: Theme.text;
+    vertical-alignment: center;
+    overflow: elide;
+}
+
+// A round-ended switch with a picture at each end and a thumb that slides
+// under one of them.
+export component Switch inherits Rectangle {
+    in property <bool> on;
+    in property <Glyph> left;
+    in property <Glyph> right;
+    callback toggled();
+    width: 40px;
+    height: 20px;
+    border-radius: 10px;
+    background: area.has-hover ? #ffffff1a : #ffffff0f;
+    border-width: 1px;
+    border-color: area.has-hover ? #ffffff2e : #ffffff1a;
+    area := TouchArea {
+        clicked => {
+            root.toggled();
+        }
+    }
+    Rectangle {
+        x: root.on ? 23px : 3px;
+        y: 3px;
+        width: 14px;
+        height: 14px;
+        border-radius: 7px;
+        background: #f9fafb;
+        animate x {
+            duration: 250ms;
+            easing: cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+    }
+    Icon {
+        x: 10px - self.width / 2;
+        glyph: root.left;
+        size: 8px;
+        fill: root.on ? #6b7280 : #fbbf24;
+    }
+    Icon {
+        x: 30px - self.width / 2;
+        glyph: root.right;
+        size: 8px;
+        fill: root.on ? #c084fc : #94a3b8;
+    }
+}
+
+export component WindowButton inherits Rectangle {
+    in property <bool> closes;
+    callback pressed-it();
+    width: 40px;
+    background: area.pressed ? (root.closes ? #b3271a : #ffffff29)
+        : area.has-hover ? (root.closes ? #c42b1c : #ffffff1a) : transparent;
+    out property <color> ink: area.has-hover ? #ffffff : #cbd5e1;
+    area := TouchArea {
+        clicked => {
+            root.pressed-it();
+        }
+    }
+    @children
+}
+
+// The bar across the top of a window, which has no title bar from
+// Windows: the dark slate of the web dashboard's, its glows, the line
+// under it and the Vigil mark. A window puts its own controls on it.
+export component BarBack inherits Rectangle {
+    // A 32px row and the line under it.
+    height: 33px;
+    background: @linear-gradient(135deg, Theme.bar-from 0%, Theme.bar-to 100%);
+    clip: true;
+
+    Glow { cx: 0; cy: 0; radius: 350px; tint: #3b82f629; }
+    Glow { cx: root.width; cy: root.height; radius: 250px; tint: #22d3ee1a; }
+    Rectangle {
+        y: parent.height - 1px;
+        height: 1px;
+        background: #60a5fa38;
+    }
+
+    // The glow the web version's mark casts.
+    Glow { cx: 20px; cy: 18px; radius: 16px; tint: #22d3ee38; }
+    Logo {
+        x: 10px;
+        y: 6px;
+        width: 20px;
+        height: 20px;
+    }
+
+    @children
+}
