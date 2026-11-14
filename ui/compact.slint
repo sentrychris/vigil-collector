@@ -7,7 +7,7 @@
 // gives it a window to draw in.
 
 import { Glyph, Icons } from "icons.slint";
-import { Theme, Type, Page, Icon, Meter, Tile, PanelTitle, Backdrop, Switch, WindowButton, BarBack } from "common.slint";
+import { Theme, Type, Page, Icon, Meter, Tile, PanelTitle, Backdrop, WindowButton, BarBack } from "common.slint";
 
 export { Theme, Page }
 
@@ -22,7 +22,6 @@ export global Host {
     // Open a service's address in the browser.
     callback open-url(string);
     callback set-dark(bool);
-    callback set-live(bool);
 }
 
 // What is worked out in Rust rather than here. The sparklines
@@ -782,25 +781,26 @@ component TitleBar inherits BarBack {
                 }
             }
         }
+        // Dark or light: a moon, lit while it is dark.
         VerticalLayout {
             alignment: center;
-            Switch {
-                on: Theme.dark;
-                left: Icons.sun;
-                right: Icons.moon;
-                toggled => {
-                    Host.set-dark(!Theme.dark);
+            Rectangle {
+                width: 26px;
+                height: 20px;
+                border-radius: 10px;
+                background: moon.has-hover ? #ffffff1a : #ffffff0f;
+                border-width: 1px;
+                border-color: moon.has-hover ? #ffffff2e : #ffffff1a;
+                moon := TouchArea {
+                    clicked => {
+                        Host.set-dark(!Theme.dark);
+                    }
                 }
-            }
-        }
-        VerticalLayout {
-            alignment: center;
-            Switch {
-                on: root.live;
-                left: Icons.bolt;
-                right: Icons.pause;
-                toggled => {
-                    Host.set-live(!root.live);
+                Icon {
+                    glyph: Icons.moon;
+                    size: 10px;
+                    fill: Theme.dark ? (moon.has-hover ? #d8b4fe : #c084fc)
+                        : (moon.has-hover ? #ffffff : #cbd5e1);
                 }
             }
         }

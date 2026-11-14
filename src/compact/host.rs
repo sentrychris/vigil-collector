@@ -256,20 +256,6 @@ fn listen(ui: &CompactWindow, hwnd: HWND, link: &Rc<RefCell<Option<String>>>) {
             }
         }
     });
-    host.on_set_live({
-        let ui = ui.as_weak();
-        move |live| {
-            if let Some(ui) = ui.upgrade() {
-                ui.set_live(live);
-                remember_look(&ui);
-                if live {
-                    // Catch up at once rather than at the next reading.
-                    // SAFETY: as in ``ask``.
-                    unsafe { PostMessageW(hwnd, WM_READINGS, 0, 0) };
-                }
-            }
-        }
-    });
 }
 
 fn remember_look(ui: &CompactWindow) {
@@ -292,6 +278,26 @@ pub fn theme_changed(dark: bool) {
         }
         None => config::remember_window_look(WindowLook {
             dark,
+            ..config::window_look()
+        }),
+    }
+}
+
+/// Settings switched following the readings live on or off: do so, here
+/// and next time. Off, the readings are brought up to date now and then
+/// (see ``PAUSED_TIMER``).
+pub fn set_live(live: bool) {
+    match open() {
+        Some(open) => {
+            open.ui.set_live(live);
+            remember_look(&open.ui);
+            if live {
+                // Catch up at once rather than at the next reading.
+                open.take_readings();
+            }
+        }
+        None => config::remember_window_look(WindowLook {
+            live,
             ..config::window_look()
         }),
     }

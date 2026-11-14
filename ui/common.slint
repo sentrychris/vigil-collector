@@ -142,50 +142,6 @@ export component PanelTitle inherits Text {
     overflow: elide;
 }
 
-// A round-ended switch with a picture at each end and a thumb that slides
-// under one of them.
-export component Switch inherits Rectangle {
-    in property <bool> on;
-    in property <Glyph> left;
-    in property <Glyph> right;
-    callback toggled();
-    width: 40px;
-    height: 20px;
-    border-radius: 10px;
-    background: area.has-hover ? #ffffff1a : #ffffff0f;
-    border-width: 1px;
-    border-color: area.has-hover ? #ffffff2e : #ffffff1a;
-    area := TouchArea {
-        clicked => {
-            root.toggled();
-        }
-    }
-    Rectangle {
-        x: root.on ? 23px : 3px;
-        y: 3px;
-        width: 14px;
-        height: 14px;
-        border-radius: 7px;
-        background: #f9fafb;
-        animate x {
-            duration: 250ms;
-            easing: cubic-bezier(0.34, 1.56, 0.64, 1);
-        }
-    }
-    Icon {
-        x: 10px - self.width / 2;
-        glyph: root.left;
-        size: 8px;
-        fill: root.on ? #6b7280 : #fbbf24;
-    }
-    Icon {
-        x: 30px - self.width / 2;
-        glyph: root.right;
-        size: 8px;
-        fill: root.on ? #c084fc : #94a3b8;
-    }
-}
-
 export component WindowButton inherits Rectangle {
     in property <bool> closes;
     callback pressed-it();

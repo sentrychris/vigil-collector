@@ -397,7 +397,8 @@ renderer, with no WebView2, no GPU and no windowing library.
 - **Fonts and icons** are built in: Montserrat, IBM Plex Mono and Lato
   ([ui/fonts](../ui/fonts/README.md), Open Font License) and outlines
   from Font Awesome Free ([ui/icons.slint](../ui/icons.slint), CC BY 4.0).
-- **Theme.** The theme and the live/paused switch are kept in
+- **Theme.** The theme and whether it is live or static (a switch in
+  Settings, which tells this window: `compact::set_live`) are kept in
   `window.json`. The full dashboard's page starts in the same theme
   (`start_in_theme` in window.rs) and each tells the other when its
   switch is used (`theme:` over `window.ipc`, a `vigil:theme` event
