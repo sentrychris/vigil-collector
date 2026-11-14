@@ -80,6 +80,9 @@ export global Form {
     in property <Note> connections-note;
     pure callback connections-verdict(/* limit */ string, /* interval */ string, /* revision */ int) -> Verdict;
     callback save-connections();
+    // Whether the compact window follows the readings live.
+    in property <bool> live: true;
+    callback set-live(bool);
 
     // Logs.
     in property <bool> logging;
@@ -121,6 +124,8 @@ export global Form {
     in property <bool> about-busy;
     in property <Note> about-note;
     callback open-settings-file();
+    // Open a web address in the browser.
+    callback open-link(string);
     callback quit();
 
     // The window.
@@ -132,6 +137,8 @@ export global Form {
 // can show the I-beam there.
 global Pointer {
     in-out property <int> over-text;
+    // The same for links, for the pointing hand.
+    in-out property <int> over-link;
 }
 
 // ─── Small parts ──────────────────────────────────────────────────────
@@ -154,6 +161,24 @@ component Help inherits Text {
 component Rule inherits Rectangle {
     height: 1px;
     background: Theme.hair;
+}
+
+// Words that open a web address in the browser when pressed. They look
+// like the text around them until the pointer is on them.
+component Link inherits Text {
+    in property <string> address;
+    in property <color> ink: Theme.muted;
+    color: area.has-hover ? Theme.accent : root.ink;
+    font-size: 10px;
+    vertical-alignment: center;
+    area := TouchArea {
+        changed has-hover => {
+            Pointer.over-link = max(0, Pointer.over-link + (self.has-hover ? 1 : -1));
+        }
+        clicked => {
+            Form.open-link(root.address);
+        }
+    }
 }
 
 // How a change went or, until one is made, a word about what it does.
@@ -811,6 +836,32 @@ component LimitsPanel inherits Panel {
     }
 }
 
+// Whether the compact window follows the readings as they are taken:
+// the switch that used to be in its bar.
+component LivePanel inherits Panel {
+    title: "COMPACT WINDOW";
+    glyph: Icons.bolt;
+    tone: Form.live ? Theme.ok : Theme.amber;
+    tint: Form.live ? #34d399 : #f59e0b;
+    pill: Form.live ? "LIVE" : "STATIC";
+    pill-color: Form.live ? Theme.ok : Theme.amber;
+
+    HorizontalLayout {
+        alignment: start;
+        Toggle {
+            label: "Live readings";
+            on: Form.live;
+            toggled => {
+                Form.set-live(!Form.live);
+            }
+        }
+    }
+    Help {
+        text: Form.live ? "The compact window follows every reading as it is taken."
+            : "The compact window is static: it is brought up to date every 30 seconds.";
+    }
+}
+
 // ─── Logs ─────────────────────────────────────────────────────────────
 
 component LogsPanel inherits Panel {
@@ -1104,6 +1155,17 @@ component AboutPanel inherits Panel {
             }
         }
         Fact {
+            name: "SOURCE";
+            Link {
+                horizontal-stretch: 1;
+                text: "https://github.com/sentrychris/vigil-collector";
+                address: self.text;
+                ink: Theme.soft;
+                font-family: Type.mono;
+                overflow: elide;
+            }
+        }
+        Fact {
             name: "RUNNING FOR";
             Text {
                 text: Form.uptime;
@@ -1163,6 +1225,10 @@ component AboutPanel inherits Panel {
             horizontal-stretch: 1;
             note: Form.about-note;
             hint: "Closing this window leaves Vigil running in the tray.";
+        }
+        Link {
+            text: "Built by Versyx Digital";
+            address: "https://versyx.digital";
         }
     }
     if root.confirming: Rectangle {
@@ -1361,6 +1427,8 @@ export component SettingsWindow inherits Window {
     public function forget-pointer() {
         Pointer.over-text = 0;
     }
+    // The pointer is over a link.
+    out property <bool> over-link: Pointer.over-link > 0;
 
     property <length> top: bar.height + 8px + tabs.height + 6px;
 
@@ -1398,6 +1466,7 @@ export component SettingsWindow inherits Window {
         height: root.height - root.top;
         ViewersPanel { }
         LimitsPanel { }
+        LivePanel { }
     }
     if Form.tab == 2: VerticalLayout {
         y: root.top;

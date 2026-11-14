@@ -273,8 +273,7 @@ Vigil draws this window itself. There is no browser in it: the layout is
 written in [Slint](https://slint.dev) and painted on the processor, only
 when a reading changes, into an ordinary window. Minimised, it draws
 nothing. It has no separate title bar. Its top bar is the title bar: drag it to move the window, and use
-the switches in it to change between the dark and light themes and to
-pause the readings. Closing it leaves Vigil running in the tray. It
+the moon in it to change between the dark and light themes. Closing it leaves Vigil running in the tray. It
 reopens where it was last closed, at the size it was, in the theme it
 was.
 
@@ -293,8 +292,9 @@ browser never sees any of it, on this computer or another):
   computer only, any device on the network, or one address) and the port.
   A change moves the running server straight away; if the new port can't
   be used, Vigil says why and stays where it was.
-- **Connections**: how many live viewers are connected, the limit, and how
-  often readings are taken.
+- **Connections**: how many live viewers are connected, the limit, how
+  often readings are taken, and whether the compact window follows them
+  live or is static (brought up to date every 30 seconds).
 - **Logs**: what Vigil has logged since it started, live, with the level
   and the on/off switch. Scrolling up holds it still; back at the end it
   follows again.

@@ -25,7 +25,7 @@ mod host;
 // ``theme_changed`` is for the full dashboard's page, which a MinGW build
 // may not have (see window_none.rs).
 #[allow(unused_imports)]
-pub use host::{Feed, close, services_changed, show, theme_changed};
+pub use host::{Feed, close, services_changed, set_live, show, theme_changed};
 
 #[cfg(test)]
 mod tests;

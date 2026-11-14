@@ -267,7 +267,7 @@ fn pressing_a_tab_shows_it() {
     let before = shown.frame.pixels.clone();
     shown.click(232.0, 56.0);
     assert_eq!(shown.form().get_tab(), LOGS);
-    assert_ne!(before, shown.frame.pixels);
+    assert!(before != shown.frame.pixels, "the picture did not change");
 }
 
 /// Where the port's field and the Save button under it are on the Server
@@ -482,12 +482,37 @@ fn opening_things_and_quitting_are_asked_for() {
 }
 
 #[test]
+fn the_links_on_about_open_in_the_browser() {
+    let mut shown = Shown::new(420, 520, 1.0, true, ABOUT);
+    // The source, on the line after the version.
+    shown.point(200.0, 140.0);
+    assert!(shown.view.ui().get_over_link());
+    shown.click(200.0, 140.0);
+    assert_eq!(
+        shown.asked(),
+        [Request::Link(
+            "https://github.com/sentrychris/vigil-collector".into()
+        )]
+    );
+    shown.point(200.0, 300.0);
+    assert!(!shown.view.ui().get_over_link());
+    // Who built it, at the right of the last line.
+    shown
+        .form()
+        .invoke_open_link("https://versyx.digital".into());
+    assert_eq!(
+        shown.asked(),
+        [Request::Link("https://versyx.digital".into())]
+    );
+}
+
+#[test]
 fn quitting_asks_first() {
     let mut shown = Shown::new(420, 520, 1.0, true, ABOUT);
     let before = shown.frame.pixels.clone();
-    shown.click(60.0, 240.0);
+    shown.click(60.0, 263.0);
     shown.save("settings-about-quit");
-    assert_ne!(before, shown.frame.pixels);
+    assert!(before != shown.frame.pixels, "the picture did not change");
     // Nothing has been asked of Vigil yet.
     assert_eq!(shown.asked(), []);
 }
@@ -536,6 +561,25 @@ fn the_connections_form_saves_what_changed() {
     // A form that is wrong asks for nothing.
     form.set_limit("20000".into());
     form.invoke_save_connections();
+    assert_eq!(shown.asked(), []);
+}
+
+#[test]
+fn the_compact_window_is_made_live_or_static_from_here() {
+    let mut shown = Shown::new(420, 520, 1.0, true, CONNECTIONS);
+    assert!(shown.form().get_live());
+    let before = shown.frame.pixels.clone();
+    shown.form().invoke_set_live(false);
+    shown.paint();
+    shown.save("settings-connections-static");
+    // It is shown at once and asked of the compact window, with nothing
+    // to wait for.
+    assert!(!shown.form().get_live());
+    assert!(before != shown.frame.pixels, "the picture did not change");
+    assert_eq!(shown.asked(), [Request::Live(false)]);
+    // As the window opens, it shows how the compact window was left.
+    shown.view.show_live(true);
+    assert!(shown.form().get_live());
     assert_eq!(shown.asked(), []);
 }
 
@@ -599,7 +643,7 @@ fn the_log_is_filtered_by_what_is_typed() {
     shown.save("settings-logs-filtered");
     let form = shown.form();
     assert_eq!(form.get_log_filter(), "Error");
-    assert_ne!(before, shown.frame.pixels);
+    assert!(before != shown.frame.pixels, "the picture did not change");
     // Every seventh made-up line is an error.
     assert_eq!(form.invoke_log_rows(400, form.get_log_filter(), 0), 6);
     let row = form.invoke_log_row(0, 400, form.get_log_filter(), 0);
@@ -641,7 +685,7 @@ fn scrolling_up_stops_following_and_the_end_starts_it_again() {
     };
     wheel(&mut shown, 96.0);
     assert!(!shown.form().get_log_follow());
-    assert_ne!(before, shown.frame.pixels);
+    assert!(before != shown.frame.pixels, "the picture did not change");
     shown.save("settings-logs-scrolled");
     // New lines don't move it while it isn't following.
     let held = shown.frame.pixels.clone();
@@ -779,7 +823,7 @@ fn a_check_is_removed_and_discard_puts_it_back() {
     shown.form().invoke_remove_check(0);
     shown.form().set_timeout("2.5".into());
     shown.paint();
-    assert_ne!(before, shown.frame.pixels);
+    assert!(before != shown.frame.pixels, "the picture did not change");
     shown.form().invoke_save_checks();
     let Some(Request::Job(job)) = shown.asked().pop() else {
         panic!("saving asked for nothing");

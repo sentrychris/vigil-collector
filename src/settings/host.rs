@@ -17,14 +17,14 @@ use std::time::Instant;
 use slint::ComponentHandle;
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    DefWindowProcW, GetWindowRect, HTCLIENT, IDC_IBEAM, LoadCursorW, PostMessageW, SW_MINIMIZE,
-    SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SetCursor, SetTimer, SetWindowPos, ShowWindow,
-    WM_APP, WM_CLOSE, WM_DPICHANGED, WM_SETCURSOR, WM_SIZE, WM_TIMER, WS_MAXIMIZEBOX,
+    DefWindowProcW, GetWindowRect, HTCLIENT, IDC_HAND, IDC_IBEAM, LoadCursorW, PostMessageW,
+    SW_MINIMIZE, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SetCursor, SetTimer, SetWindowPos,
+    ShowWindow, WM_APP, WM_CLOSE, WM_DPICHANGED, WM_SETCURSOR, WM_SIZE, WM_TIMER, WS_MAXIMIZEBOX,
     WS_OVERLAPPEDWINDOW,
 };
 
 use super::view::{Job, Outcome, Request, Section, View, Work};
-use crate::config::{self, WindowKind, WindowPlace};
+use crate::config::{self, WindowKind, WindowLook, WindowPlace};
 use crate::frame;
 use crate::native::shell::{self, FIRST_OWN_TIMER, Make, Shell};
 use crate::native::ui::{SettingsWindow, Theme};
@@ -94,7 +94,7 @@ pub fn show(panel: &Panel, runtime: &tokio::runtime::Handle) -> Result<(), Strin
     raise(
         panel,
         runtime,
-        config::window_look().dark,
+        config::window_look(),
         config::window_place(WindowKind::Settings),
         config::read_settings(),
     )?;
@@ -102,17 +102,18 @@ pub fn show(panel: &Panel, runtime: &tokio::runtime::Handle) -> Result<(), Strin
 }
 
 /// Makes the window and puts it on the screen: at ``place`` if it has
-/// been open before, in the theme the compact window was left in, with
-/// ``saved`` as what the settings file holds.
+/// been open before, in the theme the compact window was left in
+/// (``look``, which also says whether that window follows the readings
+/// live), with ``saved`` as what the settings file holds.
 fn raise(
     panel: &Panel,
     runtime: &tokio::runtime::Handle,
-    dark: bool,
+    look: WindowLook,
     place: Option<WindowPlace>,
     saved: config::Settings,
 ) -> Result<Rc<Open>, String> {
     let (ui, surface) = surface::open(SettingsWindow::new)?;
-    ui.global::<Theme>().set_dark(dark);
+    ui.global::<Theme>().set_dark(look.dark);
 
     // SAFETY: plain Win32 calls on this thread.
     let hwnd = unsafe {
@@ -152,6 +153,7 @@ fn raise(
             unsafe { PostMessageW(hwnd, WM_ASKED, 0, 0) };
         }
     });
+    view.show_live(look.live);
     let (report, finished) = std_mpsc::channel();
     let open = Rc::new(Open {
         shell: Shell::new(hwnd, surface),
@@ -222,6 +224,14 @@ impl Open {
             Request::Close => {
                 // SAFETY: posting to this thread's own window.
                 unsafe { PostMessageW(self.shell.hwnd, WM_CLOSE, 0, 0) };
+            }
+            Request::Live(live) => crate::compact::set_live(live),
+            // The addresses are the layout's own; only web addresses go
+            // to the browser all the same.
+            Request::Link(address) => {
+                if address.starts_with("https://") {
+                    crate::tray::open_external(&address);
+                }
             }
             Request::Job(job) => self.start(job),
         }
@@ -347,6 +357,11 @@ unsafe extern "system" fn window_proc(
                 SetCursor(LoadCursorW(std::ptr::null_mut(), IDC_IBEAM));
                 1
             }
+            // And over a link, the hand.
+            WM_SETCURSOR if (lparam & 0xffff) as u32 == HTCLIENT && ui.get_over_link() => {
+                SetCursor(LoadCursorW(std::ptr::null_mut(), IDC_HAND));
+                1
+            }
             WM_TIMER => {
                 if wparam == LOOK_TIMER && !open.shell.minimized() {
                     open.look();
@@ -406,6 +421,7 @@ mod tests {
 
     use super::super::tests::settings;
     use super::{open, raise, shut};
+    use crate::config::WindowLook;
     use crate::native::shell::{lparam, pump};
     use crate::native::ui::Form;
     use crate::server::control::Panel;
@@ -468,7 +484,11 @@ mod tests {
         };
         let runtime = handle_rx.recv().expect("the runtime's handle");
 
-        let open_now = raise(&panel, &runtime, true, None, settings()).expect("the window opens");
+        let look = WindowLook {
+            dark: true,
+            live: true,
+        };
+        let open_now = raise(&panel, &runtime, look, None, settings()).expect("the window opens");
         let hwnd = open_now.shell.hwnd;
         let scale = open_now.shell.scale();
         drop(open_now);

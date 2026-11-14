@@ -63,6 +63,10 @@ pub struct Job {
 #[derive(Debug, PartialEq)]
 pub enum Request {
     Job(Job),
+    /// Have the compact window follow the readings live, or stop.
+    Live(bool),
+    /// Open a web address in the browser.
+    Link(String),
     Minimize,
     Close,
 }
@@ -134,6 +138,11 @@ impl View {
 
     pub fn ui(&self) -> &SettingsWindow {
         &self.ui
+    }
+
+    /// Shows whether the compact window follows the readings live.
+    pub fn show_live(&self, live: bool) {
+        self.ui.global::<Form>().set_live(live);
     }
 
     /// The number of the newest log line shown, to ask for those after.
@@ -543,6 +552,18 @@ fn listen(ui: &SettingsWindow, inner: &Rc<Inner>) {
         }
     }));
 
+    // Nothing to wait for or save to the settings file: it is the
+    // compact window's own, and takes effect as it is pressed.
+    form.on_set_live({
+        let (ui, inner) = (ui.as_weak(), inner.clone());
+        move |live| {
+            if let Some(ui) = ui.upgrade() {
+                ui.global::<Form>().set_live(live);
+                (inner.send)(Request::Live(live));
+            }
+        }
+    });
+
     form.on_set_logging({
         let (ui, inner) = (ui.as_weak(), inner.clone());
         move |on| {
@@ -612,6 +633,10 @@ fn listen(ui: &SettingsWindow, inner: &Rc<Inner>) {
     form.on_open_settings_file(with(|ui, inner| {
         inner.job(ui, Section::About, "", Work::Open(OpenTarget::Settings));
     }));
+    form.on_open_link({
+        let inner = inner.clone();
+        move |address| (inner.send)(Request::Link(address.to_string()))
+    });
     form.on_quit(with(|ui, inner| {
         inner.job(ui, Section::About, "", Work::Quit);
     }));
