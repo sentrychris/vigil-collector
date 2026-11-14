@@ -692,7 +692,9 @@ fn copy_and_paste_work_in_a_field() {
     shown.type_in("ac");
     control(&mut shown, false);
     assert_eq!(native::clipboard::get().as_deref(), Some("warn"));
-    shown.press(Key::End);
+    // Lets go of the selection, with the cursor at its end. (Not End,
+    // which Slint leaves alone where it is built for a Mac.)
+    shown.press(Key::RightArrow);
     control(&mut shown, true);
     shown.type_in("v");
     control(&mut shown, false);
