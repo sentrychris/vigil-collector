@@ -101,7 +101,7 @@ fn forced_color() -> bool {
     false
 }
 
-/// How many recent log lines are kept in memory for the Settings page.
+/// How many recent log lines are kept in memory for Settings.
 const BUFFER_LINES: usize = 2000;
 /// The log file starts again from empty once it reaches this size. It
 /// used to be cleared by every restart, but a restart no longer starts a
@@ -291,7 +291,7 @@ pub fn apply(level: &str, enabled: bool) {
 
 /// Initialize tracing once. Clears the existing log file on startup and
 /// writes to the file, stdout and an in-memory buffer of recent lines
-/// (shown on the Settings page). ``enabled = false`` mutes all three; the
+/// (shown in Settings). ``enabled = false`` mutes all three; the
 /// level and the switch can be changed later with ``apply``.
 pub fn init(level: &str, enabled: bool) {
     let offset = UtcOffset::current_local_offset().unwrap_or(UtcOffset::UTC);

@@ -6,7 +6,8 @@
  * by. The window gives the page `window.ipc.postMessage` to ask for those
  * (see src/window.rs in the collector), and sends a `vigil:window` event
  * whenever it is maximised or put back. The page also says when its theme
- * is changed, so the compact window can follow. In a browser there is no
+ * is changed, so the collector's own windows can follow, and asks for the
+ * Settings window when the gear is pressed. In a browser there is no
  * `window.ipc`, `framed` is false and nothing here does anything.
  */
 import { readonly, ref } from "vue";
@@ -20,6 +21,7 @@ export type WindowAsk =
   | "resize:top"
   | "resize:top-left"
   | "resize:top-right"
+  | "settings"
   | "theme:dark"
   | "theme:light";
 

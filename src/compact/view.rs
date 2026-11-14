@@ -10,13 +10,12 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use slint::{
-    Color, ComponentHandle, Image, Model, ModelRc, Rgb8Pixel, Rgba8Pixel, SharedPixelBuffer,
-    SharedString, VecModel,
+    Color, ComponentHandle, Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString,
+    VecModel,
 };
 
-use super::backdrop;
 use super::spark::{self, HISTORY, Scale};
-use super::ui::{Charts, CompactWindow, ProcessRow, ServiceRow, Theme};
+use crate::native::ui::{Charts, CompactWindow, ProcessRow, ServiceRow};
 use crate::server::probes::ProbeResult;
 use crate::snapshot::Snapshot;
 
@@ -142,22 +141,6 @@ pub fn draw_from(ui: &CompactWindow, history: &Rc<RefCell<History>>) {
             ))
         }
     });
-}
-
-/// Paints the page behind the cards, for a window ``width`` by ``height``
-/// real pixels at ``scale`` of them to a layout pixel, in the theme the
-/// layout is in. Call when any of those changes.
-pub fn paint_page(ui: &CompactWindow, width: u32, height: u32, scale: f32) {
-    let dark = ui.global::<Theme>().get_dark();
-    let picture = backdrop::paint(width, height, scale, dark);
-    let page = if picture.is_empty() {
-        Image::default()
-    } else {
-        Image::from_rgb8(SharedPixelBuffer::<Rgb8Pixel>::clone_from_slice(
-            &picture, width, height,
-        ))
-    };
-    ui.global::<Charts>().set_page(page);
 }
 
 /// Shows ``snapshot``'s readings.

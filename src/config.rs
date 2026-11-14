@@ -94,7 +94,7 @@ pub const MAX_PROBES: usize = 50;
 const LOG_LEVELS: [&str; 5] = ["DEBUG", "INFO", "WARNING", "WARN", "ERROR"];
 
 impl Settings {
-    /// Checks values that came from the Settings page before they are
+    /// Checks values that came from Settings before they are
     /// saved, and says what is wrong in words a person can act on. A file
     /// edited by hand is never checked this strictly (see
     /// ``load_settings``).
@@ -310,15 +310,16 @@ pub struct WindowPlace {
     pub maximized: bool,
 }
 
-/// Which of the two desktop windows: the compact one that the tray opens
-/// (``compact/``), or the one with the full dashboard and the Settings
-/// page (``window.rs``).
+/// Which of the desktop windows: the compact one that the tray opens
+/// (``compact/``), the one with the full dashboard (``window.rs``), or
+/// Settings (``settings/``).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 // Only Windows has the windows; a MinGW build has just the compact one.
 #[allow(dead_code)]
 pub enum WindowKind {
     Compact,
     Full,
+    Settings,
 }
 
 /// How the compact window was left: its theme, and whether it was
@@ -342,6 +343,9 @@ struct WindowState {
     /// The full dashboard's window.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     full: Option<WindowPlace>,
+    /// The Settings window.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    settings: Option<WindowPlace>,
     /// Vigil is dark unless told otherwise, and live unless paused, so
     /// each is written only once it has been changed.
     #[serde(default, skip_serializing_if = "is_false")]
@@ -395,6 +399,7 @@ pub fn window_place(kind: WindowKind) -> Option<WindowPlace> {
     match kind {
         WindowKind::Compact => state.place,
         WindowKind::Full => state.full,
+        WindowKind::Settings => state.settings,
     }
 }
 
@@ -405,6 +410,7 @@ pub fn remember_window_place(kind: WindowKind, place: WindowPlace) {
     let slot = match kind {
         WindowKind::Compact => &mut state.place,
         WindowKind::Full => &mut state.full,
+        WindowKind::Settings => &mut state.settings,
     };
     if *slot != Some(place) {
         *slot = Some(place);
@@ -485,9 +491,17 @@ mod tests {
             height: 760,
             maximized: false,
         };
+        let settings = WindowPlace {
+            x: 300,
+            y: 200,
+            width: 420,
+            height: 480,
+            maximized: false,
+        };
         let state = WindowState {
             port: 4712,
             full: Some(full),
+            settings: Some(settings),
             light: true,
             paused: true,
             ..WindowState::default()
@@ -496,6 +510,7 @@ mod tests {
         let back: WindowState = serde_json::from_str(&json).unwrap();
         assert_eq!(back.place, None);
         assert_eq!(back.full, Some(full));
+        assert_eq!(back.settings, Some(settings));
         assert!(back.light && back.paused);
         // Dark and live are what a file that says nothing means.
         let quiet: WindowState = serde_json::from_str(r#"{"port":1}"#).unwrap();

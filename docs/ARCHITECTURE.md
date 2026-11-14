@@ -30,15 +30,26 @@ src/
 ├── config.rs            settings.json load + first-run defaults + migration
 ├── log.rs               tracing setup (stdout + file, classic timestamp, Windows ANSI)
 ├── tray.rs              Windows: launcher hand-off and the notification-area icon + menu
-├── compact/             the Vigil window: a compact dashboard drawn without a browser
-│   ├── mod.rs           includes the layout Slint makes of ui/compact.slint
+├── native/              what Vigil's own windows are drawn with (Slint, no browser)
+│   ├── mod.rs           includes the layouts Slint makes of ui/vigil.slint
+│   ├── surface.rs       where Slint paints: a block of pixels in memory
+│   ├── backdrop.rs      the page behind a window's cards, painted once per size
+│   ├── bar.rs           which part of a window's top drags it or resizes it
+│   ├── keys.rs          Windows' key presses as Slint's
+│   ├── clipboard.rs     what Copy and Paste in a text field use
+│   └── shell.rs         Windows: the Win32 window those pixels are shown in
+├── compact/             the Vigil window: a compact dashboard
 │   ├── view.rs          words the readings; keeps the sparklines' minute of history
 │   ├── spark.rs         the sparklines' curves and the tint under them
-│   ├── surface.rs       where Slint paints: a block of pixels in memory
-│   ├── bar.rs           which part of the window's top drags it or resizes it
-│   ├── host.rs          Windows: the Win32 window those pixels are shown in
+│   ├── host.rs          Windows: the window, fed from the sampler
 │   └── tests.rs         draws the window into a picture on every platform
-├── frame.rs             Windows: what both windows share (no title bar, remembered place)
+├── settings/            the Settings window
+│   ├── form.rs          what each form comes to: what changed, what is wrong
+│   ├── log.rs           the log folded to the width of its box
+│   ├── view.rs          fills the layout in; turns its buttons into requests
+│   ├── host.rs          Windows: the window; does what is asked through Panel
+│   └── tests.rs         draws, presses and types on it on every platform
+├── frame.rs             Windows: what all the windows share (no title bar, remembered place)
 ├── window.rs            Windows: the full dashboard's window, a WebView2 control
 ├── window_none.rs       its stand-in where it isn't built (MinGW without the feature)
 ├── ico.rs               picks the right-sized image out of the .ico for the tray
@@ -56,13 +67,13 @@ src/
 │   └── process.rs       top-N by memory and by CPU, PSS-or-RSS detection
 ├── server/              axum HTTP + WS layer
 │   ├── mod.rs           public and private routers, AppState, serve()
-│   ├── control.rs       /control API behind the Settings page (private listener only)
+│   ├── control.rs       Panel (what Settings changes) and the /control API over it
 │   ├── http.rs          GET /system, /network, /probes; embedded dashboard fallback
 │   ├── ws.rs            WebSocket upgrade and per-client push loop
 │   ├── worker.rs        single-use 5-second token registry for WS handshake
 │   └── probes.rs        external HTTP health checks (parallel reqwest)
 build.rs                 runs `npm ci` / `vite build` in web/ so the binary can embed web/dist,
-                         compiles ui/compact.slint
+                         compiles ui/vigil.slint (the compact window and Settings)
                          (and, for Windows targets, gives the .exe its icon and version details)
 ui/                      the compact window's layout (Slint), its icons, logo and fonts
 web/                     the Vue dashboard (Vite + TypeScript), served at / from the binary
@@ -209,7 +220,7 @@ a regression even if tests still pass.
 4. **CLI flags override the settings file until the user chooses
    otherwise.** `address` and `port` come from CLI if provided, else from
    `~/.vigil-collector/settings.json`, and a Restart keeps them. Saving
-   an address or port on the Settings page is the one thing that drops
+   an address or port in Settings is the one thing that drops
    the matching flag for the rest of the run
    ([Supervisor::apply](../src/supervisor.rs)). The probe list is re-read
    on every `/probes` request so operators can edit without restart
@@ -229,13 +240,17 @@ a regression even if tests still pass.
 
 ## The window and the control API
 
-This is about the window for the full dashboard and the Settings page,
-which is a web page in a WebView2 control. (The window the tray icon
-opens is a different one; see [The compact window](#the-compact-window).)
-The dashboard can't tell a browser from this window by itself; what
-it can do is ask for `/control/status`. Only the private listener answers,
-so only the window gets a Settings link and the lazily loaded Settings
-page.
+This is about the window for the full dashboard, which is a web page in
+a WebView2 control. (The window the tray icon opens and Settings are
+different ones; see [The compact window](#the-compact-window) and
+[The Settings window](#the-settings-window).) The dashboard can't tell a
+browser from this window by itself; what it can do is ask for
+`/control/status`. Only the private listener answers, so only the window
+gets a gear. In the window the gear asks the collector for the Settings
+window (`settings` over `window.ipc`); the same settings as a page of the
+dashboard (`/settings`, lazily loaded) are what the gear leads to where
+there is a private listener but no window, which is how they are worked
+on (see the README's Development section).
 
 ```
  tray thread (Win32)                     tokio runtime
@@ -362,14 +377,19 @@ renderer, with no WebView2, no GPU and no windowing library.
 - **The frame** is shared with the full dashboard's window
   ([frame.rs](../src/frame.rs)): `WM_NCCALCSIZE` removes the title bar,
   and `WM_NCHITTEST` says which parts of the picture stand in for it
-  ([bar.rs](../src/compact/bar.rs)): the bar drags, its top edge resizes.
+  ([bar.rs](../src/native/bar.rs)): the bar drags, its top edge resizes.
+- **Shared with Settings.** Everything above that isn't about readings is
+  in [src/native/](../src/native/mod.rs): `surface.rs`, and `shell.rs`,
+  the Win32 window with its painting, mouse, keyboard and hit testing.
+  `host.rs` here keeps a `Shell` and answers only the messages that are
+  the compact window's own.
 - **What Slint's software renderer doesn't do**, and how the layout gets
   by: no gradients inside paths (the tint under a sparkline is a small
   picture painted in `spark.rs`), no drop shadows and no clipping to
   rounded corners (the glows around the web version's icons are left
   out).
 - **The page behind the cards** is a picture too
-  ([backdrop.rs](../src/compact/backdrop.rs)), painted when the window's
+  ([backdrop.rs](../src/native/backdrop.rs)), painted when the window's
   size or theme changes. As five overlapping round gradients in the
   layout, it was worked out again for every repainted pixel and was
   nearly all of the cost of a reading: about 18 ms at 150% scaling on a
@@ -390,6 +410,62 @@ renderer, with no WebView2, no GPU and no windowing library.
   condition is the "Made with Slint" badge on the project's public page
   (it is in the README). Vigil's own code stays MIT.
 
+## The Settings window
+
+Settings ([src/settings/](../src/settings/mod.rs),
+[ui/settings.slint](../ui/settings.slint)) is the second window drawn
+this way: the web Settings page's sections as tabs, at the compact
+window's size and in its style. It needs no WebView2 and no private
+listener.
+
+```
+ tray thread                                         tokio runtime
+ ┌────────────────────────────────────────┐          ┌──────────────────────┐
+ │ settings.slint ── press ─▶ view.rs     │          │                      │
+ │      ▲                      │ Request  │          │                      │
+ │      │ properties           ▼          │  spawn   │ Panel::change/server │
+ │   view.rs ◀─ WM_FINISHED ─ host.rs ────┼─────────▶│   └─▶ Supervisor     │
+ │      ▲                      │          │◀─ result ┤                      │
+ │      └── once a second: Panel::status, │ (channel │                      │
+ │          log::lines_after              │ + post)  │                      │
+ └────────────────────────────────────────┘          └──────────────────────┘
+```
+
+- **One way in.** `Panel` ([control.rs](../src/server/control.rs)) is what
+  Settings shows and changes: status, `change`, `server`, `open`, `quit`.
+  The window calls it directly; the `/control` routes are thin wrappers
+  around the same calls. So a change is validated, applied and saved the
+  same way whichever asked for it.
+- **The rules are the page's.** `form.rs` works out, for each form, what
+  differs from what is saved, what is wrong, and the JSON to send, with
+  the page's wording. The layout asks for those verdicts through `pure`
+  callbacks, so they are worked out again exactly when a field or the
+  saved state changes.
+- **Nothing blocks the tray thread.** A press becomes a `Request`, which
+  the window is posted (a press arrives in the middle of Slint handling
+  the mouse). Changes and server actions wait on the supervisor on the
+  runtime thread and come back over a channel and a posted message;
+  opening a file or folder is done at once.
+- **The log** is drawn a row at a time. `log.rs` folds the kept lines to
+  the number of characters that fit (the font is fixed-width) and the
+  layout asks only for the rows in view, so two thousand lines cost the
+  same to draw as twenty. Scrolling up stops it following.
+- **Typing.** The fields are Slint's own `TextInput` in a box
+  ([settings.slint](../ui/settings.slint)). `shell.rs` passes on
+  `WM_KEYDOWN` for the keys that type nothing and for Ctrl with a letter,
+  and `WM_CHAR` for everything typed ([keys.rs](../src/native/keys.rs));
+  with AltGr held it tells Slint that Ctrl and Alt are up for the length
+  of the character, or Slint would take it for a shortcut. Copy and Paste
+  reach the Windows clipboard through the `Platform`
+  ([clipboard.rs](../src/native/clipboard.rs)). Slint has no way for a
+  custom platform to set the pointer, so the layout counts the fields
+  under it and the window shows the I-beam on `WM_SETCURSOR`.
+- **Tests.** `tests.rs` draws every tab headlessly, types into fields,
+  presses buttons and checks what was asked for and what is shown
+  afterwards. On Windows, `host.rs` opens the real window with a stand-in
+  supervisor, types into it with `WM_CHAR`, and has the server stopped
+  from the other thread. Neither touches the settings file.
+
 ## Configuration
 
 Settings live in `~/.vigil-collector/settings.json`. All keys are optional and
@@ -401,7 +477,7 @@ settings are read before logging can be configured. A UTF-8 byte-order mark
 
 Logs go to `~/.vigil-collector-logs/app.log` (truncated on startup and
 again at 4 MiB), stdout, and an in-memory buffer of the last 2000 lines
-for the Settings page. `~` is the user's home folder on every platform
+for Settings. `~` is the user's home folder on every platform
 (`C:\Users\<you>` on Windows). `RUST_LOG` overrides the configured level if set
 ([log.rs](../src/log.rs)).
 

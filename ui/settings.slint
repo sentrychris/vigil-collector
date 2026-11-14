@@ -1,0 +1,1423 @@
+// Settings: what Vigil serves and to whom, its log and its service checks,
+// in a small window drawn without a browser.
+//
+// The same settings, wording and rules as the Settings page of the web
+// dashboard (web/src/views/SettingsView.vue), laid out again for a window
+// the size of the compact dashboard and in its style: a tab for each of
+// the page's sections instead of one long page. src/settings/ fills it in
+// and does what its buttons ask.
+
+import { Glyph, Icons } from "icons.slint";
+import { Theme, Type, Icon, Meter, Tile, PanelTitle, Backdrop, WindowButton, BarBack } from "common.slint";
+
+// ─── What the window shows and asks for ───────────────────────────────
+
+// What is said beside a section's buttons about how the last change
+// went: nothing, that it worked (1), or what went wrong (2).
+export struct Note {
+    text: string,
+    kind: int,
+}
+
+// One row of the log as it is drawn: a line, or the part of a long line
+// that fits the width. 0 is an ordinary line, 1 an error, 2 a warning and
+// 3 detail (debug and trace).
+export struct LogRow {
+    text: string,
+    level: int,
+}
+
+export struct Check {
+    name: string,
+    url: string,
+}
+
+// What the program makes of a form as it stands: whether it differs from
+// what is saved, and what is wrong with it, if anything.
+export struct Verdict {
+    dirty: bool,
+    problem: string,
+}
+
+export struct ServerVerdict {
+    dirty: bool,
+    savable: bool,
+    port-valid: bool,
+}
+
+export global Form {
+    in-out property <int> tab;
+    // Changes whenever what is saved or running does, which is what has
+    // the verdicts below worked out again.
+    in property <int> revision;
+
+    // Server.
+    in property <bool> serving;
+    in property <string> listen;
+    in property <string> server-error;
+    // The flags Vigil was started with, when they decide the address.
+    in property <string> from-command-line;
+    // Who can connect: 0 this computer, 1 the network, 2 one address.
+    in-out property <int> scope;
+    in-out property <string> custom;
+    in-out property <string> port;
+    in property <bool> server-busy;
+    in property <Note> server-note;
+    pure callback server-verdict(/* scope */ int, /* custom */ string, /* port */ string, /* revision */ int) -> ServerVerdict;
+    callback start();
+    callback stop();
+    callback restart();
+    callback open-browser();
+    callback save-server();
+    callback reset-server();
+
+    // Connections.
+    in property <int> connections-active;
+    in property <int> connections-max;
+    in-out property <string> limit;
+    in-out property <string> interval;
+    in property <bool> connections-busy;
+    in property <Note> connections-note;
+    pure callback connections-verdict(/* limit */ string, /* interval */ string, /* revision */ int) -> Verdict;
+    callback save-connections();
+
+    // Logs.
+    in property <bool> logging;
+    in property <string> log-level;
+    // RUST_LOG decides the level, so the choice here has no effect.
+    in property <bool> log-level-locked;
+    in property <bool> logs-busy;
+    in property <Note> logs-note;
+    in-out property <string> log-filter;
+    in-out property <bool> log-follow: true;
+    // Changes with every new line.
+    in property <int> log-revision;
+    in property <bool> log-any;
+    // How many rows the log makes at a width in characters, and each one.
+    pure callback log-rows(/* columns */ int, /* filter */ string, /* revision */ int) -> int;
+    pure callback log-row(/* row */ int, /* columns */ int, /* filter */ string, /* revision */ int) -> LogRow;
+    callback set-logging(bool);
+    callback set-log-level(string);
+    callback open-logs();
+
+    // Service checks.
+    in property <[Check]> checks;
+    in-out property <string> timeout;
+    // Counts the edits to the list, for the same reason as `revision`.
+    in-out property <int> checks-edits;
+    in property <bool> checks-busy;
+    in property <Note> checks-note;
+    pure callback checks-verdict(/* timeout */ string, /* edits */ int, /* revision */ int) -> Verdict;
+    callback add-check();
+    callback remove-check(int);
+    callback save-checks();
+    callback reset-checks();
+
+    // About.
+    in property <string> version;
+    in property <string> uptime;
+    in property <string> settings-path;
+    in property <string> log-path;
+    in property <bool> about-busy;
+    in property <Note> about-note;
+    callback open-settings-file();
+    callback quit();
+
+    // The window.
+    callback minimize();
+    callback close();
+}
+
+// How many text fields the pointer is over (none or one), so the program
+// can show the I-beam there.
+global Pointer {
+    in-out property <int> over-text;
+}
+
+// ─── Small parts ──────────────────────────────────────────────────────
+
+// The small spaced capitals over a field or a figure.
+component Label inherits Text {
+    font-family: Type.mono-semibold;
+    font-size: 9.5px;
+    letter-spacing: 1.14px;
+    color: Theme.dim;
+    vertical-alignment: center;
+}
+
+component Help inherits Text {
+    font-size: 10px;
+    color: Theme.muted;
+    wrap: word-wrap;
+}
+
+component Rule inherits Rectangle {
+    height: 1px;
+    background: Theme.hair;
+}
+
+// How a change went or, until one is made, a word about what it does.
+component NoteLine inherits Text {
+    in property <Note> note;
+    in property <string> hint;
+    in property <bool> hint-is-problem;
+    property <bool> said: self.note.text != "";
+    text: self.said ? self.note.text : self.hint;
+    color: (self.said && self.note.kind == 2) || (!self.said && self.hint-is-problem) ? Theme.crit
+        : self.said && self.note.kind == 1 ? Theme.ok : Theme.muted;
+    font-size: 10px;
+    wrap: word-wrap;
+    vertical-alignment: center;
+}
+
+// 0 an ordinary button, 1 the one that saves, 2 one to think twice about,
+// 3 one that stays out of the way.
+component Button inherits Rectangle {
+    in property <string> text;
+    in property <Glyph> glyph;
+    in property <int> kind;
+    in property <bool> enabled: true;
+    in property <bool> small;
+    callback clicked();
+
+    property <bool> lit: area.has-hover && root.enabled;
+    property <float> strength: root.enabled ? 1 : 0.45;
+    property <color> ink: (root.kind == 1 ? #ffffff : root.kind == 2 ? Theme.crit : root.kind == 3 ? Theme.soft : Theme.text).with-alpha(self.strength);
+
+    height: root.small ? 18px : 24px;
+    width: words.preferred-width;
+    border-radius: 6px;
+    border-width: 1px;
+    background: root.kind == 1 ? (area.pressed ? #1e40af : root.lit ? Theme.primary-hover : Theme.primary).with-alpha(self.strength)
+        : root.kind == 2 ? (root.lit ? Theme.crit.with-alpha(0.12) : transparent)
+        : root.kind == 3 ? (root.lit ? Theme.hover : transparent)
+        : root.lit ? Theme.hover : Theme.field;
+    border-color: root.kind == 1 ? transparent
+        : root.kind == 2 ? Theme.crit.with-alpha(root.lit ? 1 : 0.45 * self.strength)
+        : root.kind == 3 && !root.small ? transparent
+        : root.lit ? Theme.muted : Theme.field-border;
+
+    area := TouchArea {
+        enabled: root.enabled;
+        clicked => {
+            root.clicked();
+        }
+    }
+
+    words := HorizontalLayout {
+        padding-left: root.small ? 7px : 10px;
+        padding-right: root.small ? 7px : 10px;
+        spacing: 5px;
+        if root.glyph.w > 0: VerticalLayout {
+            alignment: center;
+            Icon {
+                glyph: root.glyph;
+                size: 9px;
+                fill: root.ink;
+            }
+        }
+        if root.text != "": Text {
+            text: root.text;
+            font-size: root.small ? 10px : 10.5px;
+            font-weight: 600;
+            color: root.ink;
+            vertical-alignment: center;
+        }
+    }
+}
+
+// A line of text to type into. Slint's own text input does the typing,
+// selecting and clipboard; this is the box around it, the hint shown
+// while it is empty, and keeping the cursor in sight in a long line.
+component Field inherits Rectangle {
+    in-out property <string> text <=> input.text;
+    in property <string> placeholder;
+    in property <bool> mono;
+    in property <bool> invalid;
+    in property <InputType> input-type <=> input.input-type;
+    callback edited(string);
+    callback accepted();
+
+    height: 24px;
+    border-radius: 6px;
+    background: Theme.field;
+    border-width: 1px;
+    border-color: root.invalid ? Theme.crit : input.has-focus ? Theme.accent
+        : hot.has-hover ? Theme.muted : Theme.field-border;
+    forward-focus: input;
+
+    hot := TouchArea {
+        changed has-hover => {
+            Pointer.over-text = max(0, Pointer.over-text + (self.has-hover ? 1 : -1));
+        }
+        Rectangle {
+            x: 7px;
+            width: parent.width - 14px;
+            clip: true;
+            Text {
+                x: 0;
+                width: parent.width;
+                text: root.text == "" ? root.placeholder : "";
+                font-family: root.mono ? Type.mono : "Montserrat";
+                font-size: root.mono ? 10.5px : 11px;
+                color: Theme.dim;
+                vertical-alignment: center;
+                overflow: clip;
+            }
+            input := TextInput {
+                // How far the text is slid to the left to keep the cursor
+                // inside the box.
+                property <length> slid;
+                x: min(0px, max(parent.width - self.width - self.text-cursor-width, self.slid));
+                width: max(parent.width - self.text-cursor-width, self.preferred-width);
+                height: 100%;
+                vertical-alignment: center;
+                single-line: true;
+                font-family: root.mono ? Type.mono : "Montserrat";
+                font-size: root.mono ? 10.5px : 11px;
+                color: Theme.text;
+                selection-background-color: Theme.selection;
+                selection-foreground-color: Theme.text;
+                cursor-position-changed(at) => {
+                    if at.x + self.slid < 0 {
+                        self.slid = -at.x;
+                    } else if at.x + self.slid > parent.width - self.text-cursor-width {
+                        self.slid = parent.width - at.x - self.text-cursor-width;
+                    }
+                }
+                edited => {
+                    root.edited(self.text);
+                }
+                accepted => {
+                    root.accepted();
+                }
+            }
+        }
+    }
+}
+
+// One of a few choices of which exactly one holds, with a line under it
+// saying what it means.
+component Choice inherits Rectangle {
+    in property <bool> chosen;
+    in property <string> title;
+    in property <string> help;
+    callback picked();
+    height: 29px;
+    area := TouchArea {
+        clicked => {
+            root.picked();
+        }
+    }
+    Rectangle {
+        x: 0;
+        y: 2px;
+        width: 12px;
+        height: 12px;
+        border-radius: 6px;
+        border-width: root.chosen ? 4px : 1px;
+        border-color: root.chosen ? Theme.primary : area.has-hover ? Theme.muted : Theme.field-border;
+        background: root.chosen ? #ffffff : Theme.field;
+    }
+    Text {
+        x: 20px;
+        y: 0;
+        width: parent.width - 20px;
+        text: root.title;
+        font-size: 11px;
+        font-weight: 600;
+        color: Theme.text;
+        overflow: elide;
+    }
+    Text {
+        x: 20px;
+        y: 15px;
+        width: parent.width - 20px;
+        text: root.help;
+        font-size: 10px;
+        color: Theme.muted;
+        overflow: elide;
+    }
+}
+
+// Something that is on or off, and what it is.
+component Toggle inherits Rectangle {
+    in property <bool> on;
+    in property <string> label;
+    in property <bool> enabled: true;
+    callback toggled();
+    width: 28px + 7px + words.preferred-width;
+    height: 16px;
+    area := TouchArea {
+        enabled: root.enabled;
+        clicked => {
+            root.toggled();
+        }
+    }
+    Rectangle {
+        x: 0;
+        width: 28px;
+        border-radius: 8px;
+        background: (root.on ? Theme.primary : Theme.track).with-alpha(root.enabled ? 1 : 0.45);
+        border-width: root.on ? 0px : 1px;
+        border-color: area.has-hover ? Theme.muted : Theme.field-border;
+        Rectangle {
+            x: root.on ? 14px : 2px;
+            y: 2px;
+            width: 12px;
+            height: 12px;
+            border-radius: 6px;
+            background: #f9fafb;
+            animate x {
+                duration: 150ms;
+                easing: ease-out;
+            }
+        }
+    }
+    words := Text {
+        x: 35px;
+        text: root.label;
+        font-size: 10.5px;
+        font-weight: 500;
+        color: Theme.soft;
+        vertical-alignment: center;
+    }
+}
+
+// The log levels side by side, the one in use lit.
+component Levels inherits Rectangle {
+    in property <string> level;
+    in property <bool> enabled: true;
+    callback picked(string);
+    width: row.preferred-width;
+    height: 22px;
+    border-radius: 6px;
+    background: Theme.field;
+    border-width: 1px;
+    border-color: Theme.field-border;
+    row := HorizontalLayout {
+        padding: 2px;
+        for name in ["DEBUG", "INFO", "WARNING", "ERROR"]: choice := Rectangle {
+            property <bool> active: root.level == name;
+            border-radius: 4px;
+            background: self.active ? Theme.accent.with-alpha(0.18)
+                : area.has-hover ? Theme.hover : transparent;
+            area := TouchArea {
+                enabled: root.enabled && !choice.active;
+                clicked => {
+                    root.picked(name);
+                }
+            }
+            HorizontalLayout {
+                padding-left: 6px;
+                padding-right: 6px;
+                Text {
+                    text: name;
+                    font-family: Type.mono;
+                    font-weight: 700;
+                    font-size: 9px;
+                    letter-spacing: 0.5px;
+                    color: (choice.active ? Theme.accent : Theme.muted).with-alpha(root.enabled ? 1 : 0.45);
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+}
+
+// A card with a heading, as the compact dashboard's panels have, and
+// whatever is put in it stacked under that.
+component Panel inherits Rectangle {
+    in property <string> title;
+    in property <Glyph> glyph;
+    in property <color> tone;
+    in property <color> tint;
+    // A word about its state on the right of the heading, if any.
+    in property <string> pill;
+    in property <color> pill-color;
+
+    border-radius: 9px;
+    background: Theme.surface;
+    border-width: 1px;
+    border-color: Theme.border;
+
+    VerticalLayout {
+        padding: 1px;
+        HorizontalLayout {
+            height: 32px;
+            padding-left: 10px;
+            padding-right: 10px;
+            spacing: 9px;
+            VerticalLayout {
+                alignment: center;
+                Tile {
+                    width: 20px;
+                    height: 20px;
+                    tint: root.tint;
+                    Icon {
+                        glyph: root.glyph;
+                        size: 10px;
+                        fill: root.tone;
+                    }
+                }
+            }
+            PanelTitle {
+                text: root.title;
+            }
+            Rectangle {
+                horizontal-stretch: 1;
+            }
+            if root.pill != "": VerticalLayout {
+                alignment: center;
+                Rectangle {
+                    width: verdict.preferred-width;
+                    height: 18px;
+                    border-radius: 9px;
+                    background: root.pill-color.with-alpha(0.12);
+                    border-width: 1px;
+                    border-color: root.pill-color.with-alpha(0.3);
+                    verdict := HorizontalLayout {
+                        padding-left: 7px;
+                        padding-right: 7px;
+                        spacing: 5px;
+                        VerticalLayout {
+                            alignment: center;
+                            Rectangle {
+                                width: 6px;
+                                height: 6px;
+                                border-radius: 3px;
+                                background: root.pill-color;
+                            }
+                        }
+                        Text {
+                            text: root.pill;
+                            font-family: Type.mono;
+                            font-weight: 700;
+                            font-size: 9px;
+                            letter-spacing: 0.9px;
+                            color: root.pill-color;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+        VerticalLayout {
+            padding-left: 10px;
+            padding-right: 10px;
+            padding-bottom: 10px;
+            spacing: 8px;
+            @children
+        }
+    }
+}
+
+// ─── Server ───────────────────────────────────────────────────────────
+
+component ServerPanel inherits Panel {
+    title: "SERVER";
+    glyph: Icons.server;
+    tone: Theme.blue;
+    tint: #3b82f6;
+    pill: Form.serving ? "SERVING" : Form.server-error != "" ? "NOT SERVING" : "STOPPED";
+    pill-color: Form.serving ? Theme.ok : Form.server-error != "" ? Theme.crit : Theme.muted;
+
+    VerticalLayout {
+        spacing: 3px;
+        Label {
+            text: Form.serving ? "LISTENING ON" : "NOT SERVING";
+        }
+        if Form.serving: Text {
+            text: Form.listen;
+            font-family: Type.mono-semibold;
+            font-size: 15px;
+            color: Theme.text;
+            overflow: elide;
+        }
+        if !Form.serving: Help {
+            text: "Nothing else can connect right now. Vigil's own windows keep monitoring.";
+            color: Theme.soft;
+        }
+        if !Form.serving && Form.server-error != "": Help {
+            text: Form.server-error;
+            color: Theme.crit;
+        }
+    }
+    HorizontalLayout {
+        alignment: start;
+        spacing: 6px;
+        if Form.serving: Button {
+            text: "Stop";
+            glyph: Icons.stop;
+            enabled: !Form.server-busy;
+            clicked => {
+                Form.stop();
+            }
+        }
+        if !Form.serving: Button {
+            text: "Start";
+            glyph: Icons.play;
+            kind: 1;
+            enabled: !Form.server-busy;
+            clicked => {
+                Form.start();
+            }
+        }
+        Button {
+            text: "Restart";
+            glyph: Icons.arrow-rotate-right;
+            enabled: !Form.server-busy && Form.serving;
+            clicked => {
+                Form.restart();
+            }
+        }
+        Button {
+            text: "Browser";
+            glyph: Icons.up-right-from-square;
+            enabled: !Form.server-busy && Form.serving;
+            clicked => {
+                Form.open-browser();
+            }
+        }
+    }
+}
+
+component AccessPanel inherits Panel {
+    property <ServerVerdict> verdict: Form.server-verdict(Form.scope, Form.custom, Form.port, Form.revision);
+    function save() {
+        if self.verdict.savable && !Form.server-busy {
+            Form.save-server();
+        }
+    }
+
+    title: "WHO CAN CONNECT";
+    glyph: Icons.users;
+    tone: Theme.cyan;
+    tint: #22d3ee;
+
+    VerticalLayout {
+        spacing: 4px;
+        Choice {
+            chosen: Form.scope == 0;
+            title: "This computer only";
+            help: "Nothing else on the network can reach it.";
+            picked => {
+                Form.scope = 0;
+            }
+        }
+        Choice {
+            chosen: Form.scope == 1;
+            title: "Any device on my network";
+            help: "Listens on 0.0.0.0. Your firewall may ask to allow it.";
+            picked => {
+                Form.scope = 1;
+            }
+        }
+        Choice {
+            chosen: Form.scope == 2;
+            title: "One address of this computer";
+            help: "For a machine with several network adapters.";
+            picked => {
+                Form.scope = 2;
+            }
+        }
+        if Form.scope == 2: Field {
+            text <=> Form.custom;
+            mono: true;
+            placeholder: "192.168.1.20";
+            accepted => {
+                root.save();
+            }
+        }
+    }
+    HorizontalLayout {
+        spacing: 10px;
+        VerticalLayout {
+            width: 92px;
+            spacing: 4px;
+            Label {
+                text: "PORT";
+            }
+            Field {
+                text <=> Form.port;
+                mono: true;
+                input-type: number;
+                invalid: !root.verdict.port-valid;
+                accepted => {
+                    root.save();
+                }
+            }
+        }
+        VerticalLayout {
+            alignment: end;
+            Help {
+                height: 24px;
+                vertical-alignment: center;
+                text: root.verdict.port-valid ? "The default is 4500." : "Between 1 and 65535.";
+                color: root.verdict.port-valid ? Theme.muted : Theme.crit;
+            }
+        }
+    }
+    HorizontalLayout {
+        spacing: 6px;
+        Button {
+            text: "Save";
+            kind: 1;
+            enabled: root.verdict.savable && !Form.server-busy;
+            clicked => {
+                root.save();
+            }
+        }
+        if root.verdict.dirty: Button {
+            text: "Discard";
+            kind: 3;
+            enabled: !Form.server-busy;
+            clicked => {
+                Form.reset-server();
+            }
+        }
+        NoteLine {
+            horizontal-stretch: 1;
+            note: Form.server-note;
+            hint: root.verdict.dirty && Form.serving ? "Saving moves the server. Anyone connected reconnects." : "";
+        }
+    }
+    if Form.from-command-line != "": Help {
+        text: "Vigil was started with " + Form.from-command-line + ", which is used instead of the saved setting until you save a different one here.";
+    }
+}
+
+// ─── Connections ──────────────────────────────────────────────────────
+
+component ViewersPanel inherits Panel {
+    title: "CONNECTIONS";
+    glyph: Icons.users;
+    tone: Theme.purple;
+    tint: #a855f7;
+
+    VerticalLayout {
+        spacing: 3px;
+        Label {
+            text: "LIVE CONNECTIONS";
+        }
+        HorizontalLayout {
+            alignment: start;
+            spacing: 6px;
+            Text {
+                text: Form.connections-active;
+                font-family: Type.figures;
+                font-size: 24px;
+                color: Theme.text;
+            }
+            VerticalLayout {
+                alignment: end;
+                padding-bottom: 5px;
+                Text {
+                    text: "of " + Form.connections-max + " in use";
+                    font-size: 10.5px;
+                    color: Theme.muted;
+                }
+            }
+        }
+        Meter {
+            height: 4px;
+            share: Form.connections-max == 0 ? 0 : 100 * Form.connections-active / Form.connections-max;
+            tone: Theme.purple;
+        }
+    }
+    Help {
+        text: "Vigil's own windows aren't counted and can't be locked out.";
+    }
+}
+
+component LimitsPanel inherits Panel {
+    property <Verdict> verdict: Form.connections-verdict(Form.limit, Form.interval, Form.revision);
+    function save() {
+        if self.verdict.dirty && self.verdict.problem == "" && !Form.connections-busy {
+            Form.save-connections();
+        }
+    }
+
+    title: "LIMITS";
+    glyph: Icons.gauge-high;
+    tone: Theme.amber;
+    tint: #f59e0b;
+
+    HorizontalLayout {
+        spacing: 10px;
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 4px;
+            Label {
+                text: "CONNECTION LIMIT";
+            }
+            Field {
+                text <=> Form.limit;
+                mono: true;
+                input-type: number;
+                accepted => {
+                    root.save();
+                }
+            }
+            Help {
+                text: "Further viewers are turned away. 0 allows none.";
+            }
+        }
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 4px;
+            Label {
+                text: "UPDATE EVERY";
+            }
+            HorizontalLayout {
+                spacing: 6px;
+                Field {
+                    horizontal-stretch: 1;
+                    text <=> Form.interval;
+                    mono: true;
+                    input-type: decimal;
+                    accepted => {
+                        root.save();
+                    }
+                }
+                Text {
+                    text: "seconds";
+                    font-size: 10.5px;
+                    color: Theme.muted;
+                    vertical-alignment: center;
+                }
+            }
+            Help {
+                text: "How often readings are taken and sent.";
+            }
+        }
+    }
+    HorizontalLayout {
+        spacing: 6px;
+        Button {
+            text: "Save";
+            kind: 1;
+            enabled: root.verdict.dirty && root.verdict.problem == "" && !Form.connections-busy;
+            clicked => {
+                root.save();
+            }
+        }
+        NoteLine {
+            horizontal-stretch: 1;
+            note: Form.connections-note;
+            hint: root.verdict.problem != "" ? root.verdict.problem : "Takes effect straight away. Nobody is disconnected.";
+            hint-is-problem: root.verdict.problem != "";
+        }
+    }
+}
+
+// ─── Logs ─────────────────────────────────────────────────────────────
+
+component LogsPanel inherits Panel {
+    title: "LOGS";
+    glyph: Icons.list-ul;
+    tone: Theme.muted;
+    tint: #94a3b8;
+
+    HorizontalLayout {
+        spacing: 8px;
+        VerticalLayout {
+            alignment: center;
+            Toggle {
+                label: "Keep a log";
+                on: Form.logging;
+                enabled: !Form.logs-busy;
+                toggled => {
+                    Form.set-logging(!Form.logging);
+                }
+            }
+        }
+        Rectangle {
+            horizontal-stretch: 1;
+        }
+        Text {
+            text: "Level";
+            font-size: 10.5px;
+            font-weight: 500;
+            color: Theme.soft;
+            vertical-alignment: center;
+        }
+        Levels {
+            level: Form.log-level;
+            enabled: !Form.logs-busy && !Form.log-level-locked;
+            picked(level) => {
+                Form.set-log-level(level);
+            }
+        }
+    }
+    HorizontalLayout {
+        spacing: 8px;
+        Field {
+            horizontal-stretch: 1;
+            text <=> Form.log-filter;
+            placeholder: "Filter";
+        }
+        VerticalLayout {
+            alignment: center;
+            Toggle {
+                label: "Follow";
+                on: Form.log-follow;
+                toggled => {
+                    Form.log-follow = !Form.log-follow;
+                }
+            }
+        }
+        Button {
+            text: "Open log file";
+            glyph: Icons.folder-open;
+            enabled: !Form.logs-busy;
+            clicked => {
+                Form.open-logs();
+            }
+        }
+    }
+    if Form.logs-note.text != "": NoteLine {
+        note: Form.logs-note;
+    }
+    if Form.log-level-locked: Help {
+        text: "The level is set by the RUST_LOG environment variable, so the choice here has no effect until Vigil is started without it.";
+    }
+}
+
+// The log itself: a terminal in both themes. Long lines are folded to
+// the width by the program, which knows how many characters fit because
+// every one is as wide as the next. Only the rows in view exist, however
+// long the log is.
+component LogView inherits Rectangle {
+    property <length> row-height: 14px;
+    // IBM Plex Mono's characters are six tenths as wide as they are tall.
+    property <length> character: 6px;
+    property <int> columns: max(20, floor((self.width - 26px) / self.character));
+    property <int> rows: Form.log-rows(self.columns, Form.log-filter, Form.log-revision);
+    property <int> in-view: max(1, floor((self.height - 12px) / self.row-height));
+    property <int> last-top: max(0, self.rows - self.in-view);
+    // Where the wheel left it, while it isn't following the newest line.
+    property <int> left-at;
+    property <int> top: Form.log-follow ? self.last-top : clamp(self.left-at, 0, self.last-top);
+
+    border-radius: 9px;
+    background: #0a0e17;
+    border-width: 1px;
+    border-color: #94a3b829;
+    clip: true;
+
+    TouchArea {
+        scroll-event(event) => {
+            // Three rows to a notch of the wheel. Scrolling up stops it
+            // following; back at the end, it follows again.
+            root.left-at = clamp(root.top - round(event.delta-y / 16px), 0, root.last-top);
+            Form.log-follow = root.left-at >= root.last-top;
+            accept
+        }
+    }
+
+    for index in root.in-view: Text {
+        property <LogRow> line: Form.log-row(root.top + index, root.columns, Form.log-filter, Form.log-revision);
+        x: 10px;
+        y: 6px + index * root.row-height;
+        width: root.width - 20px;
+        height: root.row-height;
+        text: self.line.text;
+        font-family: Type.mono;
+        font-size: 10px;
+        color: self.line.level == 1 ? #f87171 : self.line.level == 2 ? #fbbf24 : self.line.level == 3 ? #64748b : #cbd5e1;
+        vertical-alignment: center;
+        overflow: clip;
+    }
+
+    if root.rows == 0: Text {
+        x: 10px;
+        y: 6px;
+        height: root.row-height;
+        text: Form.log-any ? "No lines match." : Form.logging ? "Nothing logged yet." : "Logging is off.";
+        font-family: Type.mono;
+        font-size: 10px;
+        color: #64748b;
+        vertical-alignment: center;
+    }
+
+    if root.rows > root.in-view: Rectangle {
+        property <length> travel: root.height - self.height - 4px;
+        x: root.width - 6px;
+        y: 2px + self.travel * root.top / root.last-top;
+        width: 4px;
+        height: max(24px, (root.height - 4px) * root.in-view / root.rows);
+        border-radius: 2px;
+        background: #94a3b83d;
+    }
+}
+
+// ─── Service checks ───────────────────────────────────────────────────
+
+component ChecksPanel inherits Panel {
+    property <Verdict> verdict: Form.checks-verdict(Form.timeout, Form.checks-edits, Form.revision);
+    function save() {
+        if self.verdict.dirty && self.verdict.problem == "" && !Form.checks-busy {
+            Form.save-checks();
+        }
+    }
+
+    title: "SERVICE CHECKS";
+    glyph: Icons.heart-pulse;
+    tone: Theme.red;
+    tint: #ef4444;
+
+    if Form.checks.length == 0: Help {
+        text: "No checks. The Services line on the dashboard stays hidden.";
+    }
+    if Form.checks.length > 0: VerticalLayout {
+        spacing: 4px;
+        for check[index] in Form.checks: HorizontalLayout {
+            spacing: 4px;
+            Field {
+                width: (root.width - 22px) * 32%;
+                text: check.name;
+                placeholder: "Name";
+                edited(text) => {
+                    check.name = text;
+                    Form.checks-edits += 1;
+                }
+                accepted => {
+                    root.save();
+                }
+            }
+            Field {
+                horizontal-stretch: 1;
+                text: check.url;
+                mono: true;
+                placeholder: "https://example.com/health";
+                edited(text) => {
+                    check.url = text;
+                    Form.checks-edits += 1;
+                }
+                accepted => {
+                    root.save();
+                }
+            }
+            Button {
+                glyph: Icons.xmark;
+                kind: 3;
+                clicked => {
+                    Form.remove-check(index);
+                }
+            }
+        }
+    }
+    HorizontalLayout {
+        spacing: 6px;
+        Button {
+            text: "Add a check";
+            glyph: Icons.plus;
+            enabled: Form.checks.length < 50;
+            clicked => {
+                Form.add-check();
+            }
+        }
+        Rectangle {
+            horizontal-stretch: 1;
+        }
+        Text {
+            text: "Give up after";
+            font-size: 10.5px;
+            color: Theme.soft;
+            vertical-alignment: center;
+        }
+        Field {
+            width: 52px;
+            text <=> Form.timeout;
+            mono: true;
+            input-type: decimal;
+            accepted => {
+                root.save();
+            }
+        }
+        Text {
+            text: "seconds";
+            font-size: 10.5px;
+            color: Theme.muted;
+            vertical-alignment: center;
+        }
+    }
+    HorizontalLayout {
+        spacing: 6px;
+        Button {
+            text: "Save";
+            kind: 1;
+            enabled: root.verdict.dirty && root.verdict.problem == "" && !Form.checks-busy;
+            clicked => {
+                root.save();
+            }
+        }
+        if root.verdict.dirty: Button {
+            text: "Discard";
+            kind: 3;
+            enabled: !Form.checks-busy;
+            clicked => {
+                Form.reset-checks();
+            }
+        }
+        NoteLine {
+            horizontal-stretch: 1;
+            note: Form.checks-note;
+            hint: root.verdict.dirty ? root.verdict.problem : "";
+            hint-is-problem: true;
+        }
+    }
+}
+
+// ─── About ────────────────────────────────────────────────────────────
+
+component Fact inherits HorizontalLayout {
+    in property <string> name;
+    spacing: 10px;
+    Label {
+        width: 92px;
+        height: 16px;
+        text: root.name;
+    }
+    @children
+}
+
+component AboutPanel inherits Panel {
+    property <bool> confirming;
+
+    title: "ABOUT";
+    glyph: Icons.circle-info;
+    tone: Theme.amber;
+    tint: #f59e0b;
+
+    VerticalLayout {
+        spacing: 6px;
+        Fact {
+            name: "VERSION";
+            Text {
+                text: Form.version;
+                font-family: Type.mono;
+                font-size: 11px;
+                color: Theme.text;
+                vertical-alignment: center;
+            }
+        }
+        Fact {
+            name: "RUNNING FOR";
+            Text {
+                text: Form.uptime;
+                font-size: 11px;
+                color: Theme.text;
+                vertical-alignment: center;
+            }
+        }
+        Fact {
+            name: "SETTINGS FILE";
+            Text {
+                horizontal-stretch: 1;
+                text: Form.settings-path;
+                font-family: Type.mono;
+                font-size: 10px;
+                color: Theme.soft;
+                wrap: char-wrap;
+            }
+            VerticalLayout {
+                alignment: start;
+                Button {
+                    text: "Open";
+                    small: true;
+                    kind: 3;
+                    enabled: !Form.about-busy;
+                    clicked => {
+                        Form.open-settings-file();
+                    }
+                }
+            }
+        }
+        Fact {
+            name: "LOG FILE";
+            Text {
+                horizontal-stretch: 1;
+                text: Form.log-path;
+                font-family: Type.mono;
+                font-size: 10px;
+                color: Theme.soft;
+                wrap: char-wrap;
+            }
+        }
+    }
+    Rule { }
+
+    if !root.confirming: HorizontalLayout {
+        spacing: 8px;
+        Button {
+            text: "Quit Vigil";
+            glyph: Icons.power-off;
+            kind: 2;
+            clicked => {
+                root.confirming = true;
+            }
+        }
+        NoteLine {
+            horizontal-stretch: 1;
+            note: Form.about-note;
+            hint: "Closing this window leaves Vigil running in the tray.";
+        }
+    }
+    if root.confirming: Rectangle {
+        border-radius: 8px;
+        background: Theme.crit.with-alpha(0.08);
+        border-width: 1px;
+        border-color: Theme.crit.with-alpha(0.4);
+        VerticalLayout {
+            padding: 9px;
+            spacing: 8px;
+            Text {
+                text: "Quit Vigil? Monitoring stops, the tray icon goes, and anyone connected is disconnected.";
+                font-size: 10.5px;
+                color: Theme.text;
+                wrap: word-wrap;
+            }
+            HorizontalLayout {
+                alignment: start;
+                spacing: 6px;
+                Button {
+                    text: "Quit";
+                    kind: 2;
+                    enabled: !Form.about-busy;
+                    clicked => {
+                        Form.quit();
+                        root.confirming = false;
+                    }
+                }
+                Button {
+                    text: "Keep running";
+                    clicked => {
+                        root.confirming = false;
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ─── The title bar and the tabs ───────────────────────────────────────
+
+component SettingsBar inherits BarBack {
+    // Everything left of this is bare bar, which moves the window.
+    out property <length> caption-until: self.width - 80px;
+
+    Text {
+        x: 38px;
+        height: 32px;
+        text: "SETTINGS";
+        font-family: Type.mono;
+        font-weight: 700;
+        font-size: 9.5px;
+        letter-spacing: 1.52px;
+        color: #cbd5e1;
+        vertical-alignment: center;
+    }
+
+    HorizontalLayout {
+        x: root.width - self.width;
+        y: 0;
+        width: 80px;
+        height: 32px;
+        minimise := WindowButton {
+            pressed-it => {
+                Form.minimize();
+            }
+            Path {
+                width: 10px;
+                height: 10px;
+                viewbox-width: 10;
+                viewbox-height: 10;
+                commands: "M0 5.5L10 5.5";
+                stroke: minimise.ink;
+                stroke-width: 1px;
+            }
+        }
+        close := WindowButton {
+            closes: true;
+            pressed-it => {
+                Form.close();
+            }
+            Path {
+                width: 10px;
+                height: 10px;
+                viewbox-width: 10;
+                viewbox-height: 10;
+                commands: "M0.5 0.5L9.5 9.5M9.5 0.5L0.5 9.5";
+                stroke: close.ink;
+                stroke-width: 1px;
+            }
+        }
+    }
+}
+
+struct TabName {
+    name: string,
+    glyph: Glyph,
+}
+
+component Tabs inherits Rectangle {
+    in-out property <int> current;
+    // Whether there is room for each tab's picture beside its name.
+    in property <bool> pictures: true;
+    property <[TabName]> names: [
+        { name: "Server", glyph: Icons.server },
+        { name: "Connections", glyph: Icons.users },
+        { name: "Logs", glyph: Icons.list-ul },
+        { name: "Checks", glyph: Icons.heart-pulse },
+        { name: "About", glyph: Icons.circle-info },
+    ];
+
+    height: 30px;
+    border-radius: 9px;
+    background: Theme.surface;
+    border-width: 1px;
+    border-color: Theme.border;
+
+    HorizontalLayout {
+        padding: 3px;
+        spacing: 2px;
+        for tab[index] in root.names: cell := Rectangle {
+            property <bool> active: root.current == index;
+            property <color> ink: self.active ? Theme.accent : area.has-hover ? Theme.text : Theme.muted;
+            horizontal-stretch: 1;
+            border-radius: 6px;
+            background: self.active ? Theme.accent.with-alpha(0.14) : area.has-hover ? Theme.hover : transparent;
+            area := TouchArea {
+                clicked => {
+                    root.current = index;
+                }
+            }
+            HorizontalLayout {
+                alignment: center;
+                padding-left: 6px;
+                padding-right: 6px;
+                spacing: 5px;
+                if root.pictures: VerticalLayout {
+                    alignment: center;
+                    Icon {
+                        glyph: tab.glyph;
+                        size: 9px;
+                        fill: cell.ink;
+                    }
+                }
+                Text {
+                    text: tab.name;
+                    font-size: 10.5px;
+                    font-weight: 600;
+                    color: cell.ink;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+}
+
+// A tab's panels in a column that scrolls when the window is too short
+// for them, with the compact dashboard's slim scrollbar.
+component Scrolled inherits Rectangle {
+    scroller := Flickable {
+        interactive: false;
+        content-width: self.width;
+        content-height: max(self.height, column.preferred-height);
+        column := VerticalLayout {
+            width: scroller.width;
+            padding: 8px;
+            padding-top: 0px;
+            spacing: 6px;
+            alignment: start;
+            @children
+        }
+    }
+
+    if scroller.content-height > scroller.height: Rectangle {
+        property <length> travel: scroller.height - self.height - 4px;
+        x: root.width - 6px;
+        y: 2px + self.travel * (-scroller.content-y / (scroller.content-height - scroller.height));
+        width: 4px;
+        height: max(40px, scroller.height * scroller.height / scroller.content-height);
+        border-radius: 2px;
+        background: Theme.scroll-thumb;
+    }
+}
+
+// ─── The window ───────────────────────────────────────────────────────
+
+export component SettingsWindow inherits Window {
+    // For the program's own hit testing: the bar's height, and how far
+    // from the left it is bare (see SettingsBar).
+    out property <length> bar-height: bar.height;
+    out property <length> caption-until: bar.caption-until;
+    // The pointer is over somewhere to type.
+    out property <bool> over-text: Pointer.over-text > 0;
+    // A field the pointer was over may have gone without the pointer
+    // leaving it; this starts the count again.
+    public function forget-pointer() {
+        Pointer.over-text = 0;
+    }
+
+    property <length> top: bar.height + 8px + tabs.height + 6px;
+
+    title: "Vigil Settings";
+    preferred-width: 420px;
+    preferred-height: 480px;
+    min-width: 360px;
+    min-height: 320px;
+    background: Theme.page;
+    default-font-family: "Montserrat";
+    default-font-size: 11px;
+
+    Backdrop { }
+
+    bar := SettingsBar {
+        y: 0;
+    }
+
+    tabs := Tabs {
+        x: 8px;
+        y: bar.height + 8px;
+        width: root.width - 16px;
+        current <=> Form.tab;
+        pictures: root.width >= 404px;
+    }
+
+    if Form.tab == 0: Scrolled {
+        y: root.top;
+        height: root.height - root.top;
+        ServerPanel { }
+        AccessPanel { }
+    }
+    if Form.tab == 1: Scrolled {
+        y: root.top;
+        height: root.height - root.top;
+        ViewersPanel { }
+        LimitsPanel { }
+    }
+    if Form.tab == 2: VerticalLayout {
+        y: root.top;
+        height: root.height - root.top;
+        padding: 8px;
+        padding-top: 0px;
+        spacing: 6px;
+        LogsPanel { }
+        LogView {
+            vertical-stretch: 1;
+        }
+    }
+    if Form.tab == 3: Scrolled {
+        y: root.top;
+        height: root.height - root.top;
+        ChecksPanel { }
+    }
+    if Form.tab == 4: Scrolled {
+        y: root.top;
+        height: root.height - root.top;
+        AboutPanel { }
+    }
+}

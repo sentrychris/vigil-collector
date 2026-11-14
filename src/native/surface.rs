@@ -1,11 +1,11 @@
-//! Where Slint draws the compact window: into a block of pixels in
-//! memory, with no windowing system or graphics card involved.
+//! Where Slint draws a window: into a block of pixels in memory, with no
+//! windowing system or graphics card involved.
 //!
 //! Slint usually brings its own window (through winit) and a renderer
 //! that wants OpenGL or better. Neither is used here. This is Slint's
 //! other mode, meant for small devices: the program says how big the
 //! picture is and passes on the mouse, and Slint's software renderer
-//! paints the picture into a buffer it is handed. ``host.rs`` copies that
+//! paints the picture into a buffer it is handed. ``shell.rs`` copies that
 //! buffer to a window of its own on Windows; the tests write it to a PNG.
 //!
 //! Everything here belongs to one thread, the one that first calls
@@ -18,10 +18,10 @@ use std::time::{Duration, Instant};
 use slint::platform::software_renderer::{
     PremultipliedRgbaColor, RepaintBufferType, SoftwareRenderer, TargetPixel,
 };
-use slint::platform::{Platform, PlatformError, Renderer, WindowAdapter, WindowEvent};
+use slint::platform::{Clipboard, Platform, PlatformError, Renderer, WindowAdapter, WindowEvent};
 use slint::{ComponentHandle, LogicalSize, PhysicalSize, Window, WindowSize};
 
-use super::ui::CompactWindow;
+use super::clipboard;
 
 /// One pixel as Windows keeps them in a 32-bit bitmap: blue in the low
 /// byte, then green, then red, and a top byte nothing reads. Slint paints
@@ -111,8 +111,7 @@ impl Surface {
         self.window.request_redraw();
     }
 
-    /// Passes a mouse or window event on to the layout.
-    #[cfg_attr(not(windows), allow(dead_code))]
+    /// Passes a mouse, keyboard or window event on to the layout.
     pub fn send(&self, event: WindowEvent) {
         self.window.dispatch_event(event);
     }
@@ -188,8 +187,8 @@ impl WindowAdapter for Surface {
     }
 }
 
-/// Slint's idea of the system it runs on: here, only a clock and a way to
-/// make the one kind of window above.
+/// Slint's idea of the system it runs on: here, only a clock, a clipboard
+/// and a way to make the one kind of window above.
 struct Headless {
     started: Instant,
 }
@@ -211,11 +210,26 @@ impl Platform for Headless {
     fn duration_since_start(&self) -> Duration {
         self.started.elapsed()
     }
+
+    // What a text field's Copy, Cut and Paste use.
+    fn set_clipboard_text(&self, text: &str, clipboard: Clipboard) {
+        if clipboard == Clipboard::DefaultClipboard {
+            clipboard::set(text);
+        }
+    }
+
+    fn clipboard_text(&self, clipboard: Clipboard) -> Option<String> {
+        (clipboard == Clipboard::DefaultClipboard)
+            .then(clipboard::get)
+            .flatten()
+    }
 }
 
-/// Makes the compact window's layout and the surface it draws on. Nothing
-/// is on any screen yet: that is up to the caller.
-pub fn open() -> Result<(CompactWindow, Rc<Surface>), String> {
+/// Makes a window's layout with ``make`` (its ``new``) and the surface it
+/// draws on. Nothing is on any screen yet: that is up to the caller.
+pub fn open<T: ComponentHandle>(
+    make: impl FnOnce() -> Result<T, PlatformError>,
+) -> Result<(T, Rc<Surface>), String> {
     if !INSTALLED.get() {
         slint::platform::set_platform(Box::new(Headless {
             started: Instant::now(),
@@ -223,7 +237,7 @@ pub fn open() -> Result<(CompactWindow, Rc<Surface>), String> {
         .map_err(|e| e.to_string())?;
         INSTALLED.set(true);
     }
-    let ui = CompactWindow::new().map_err(|e| e.to_string())?;
+    let ui = make().map_err(|e| e.to_string())?;
     let surface = NEWEST
         .take()
         .ok_or_else(|| "the layout was made without a surface".to_string())?;
