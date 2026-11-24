@@ -15,27 +15,51 @@ use slint::{
 };
 
 use super::spark::{self, HISTORY, Scale};
-use crate::native::ui::{Charts, CompactWindow, ProcessRow, ServiceRow};
+use crate::native::ui::{Charts, CompactWindow, DiskRow, ProcessRow, ServiceRow};
 use crate::server::probes::ProbeResult;
-use crate::snapshot::Snapshot;
+use crate::snapshot::{DiskInfo, Snapshot};
 
 /// A response slower than this, in milliseconds, counts as slow (the web
 /// dashboard's ``config.services.thresholds.slow``).
 const SLOW_MS: u64 = 800;
 
-/// The sparklines, by the numbers ``ui/compact.slint`` knows them by.
+/// The sparklines. ``ui/compact.slint`` knows each by a number (see
+/// ``Series::index``).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Series {
-    Cpu = 0,
-    Memory = 1,
-    DiskIo = 2,
-    Sent = 3,
-    Received = 4,
-    Gpu = 5,
+    Cpu,
+    Memory,
+    /// Reads and writes of every disk together.
+    DiskIo,
+    Sent,
+    Received,
+    Gpu,
+    /// Reads and writes of one disk: the one on the Disk card this many
+    /// down from the first.
+    Disk(usize),
 }
 
+/// The number of the first disk's own series; the next disk's is one
+/// more, and so on.
+const FIRST_DISK: i32 = 100;
+
 impl Series {
+    fn index(self) -> i32 {
+        match self {
+            Series::Cpu => 0,
+            Series::Memory => 1,
+            Series::DiskIo => 2,
+            Series::Sent => 3,
+            Series::Received => 4,
+            Series::Gpu => 5,
+            Series::Disk(row) => FIRST_DISK + row as i32,
+        }
+    }
+
     fn from_index(index: i32) -> Option<Series> {
+        if index >= FIRST_DISK {
+            return Some(Series::Disk((index - FIRST_DISK) as usize));
+        }
         [
             Series::Cpu,
             Series::Memory,
@@ -45,7 +69,7 @@ impl Series {
             Series::Gpu,
         ]
         .into_iter()
-        .find(|series| *series as i32 == index)
+        .find(|series| series.index() == index)
     }
 }
 
@@ -58,6 +82,9 @@ pub struct History {
     sent: Vec<f64>,
     received: Vec<f64>,
     gpu: Vec<f64>,
+    /// Each shown disk's own reads and writes, by its mount point, in
+    /// the order of the Disk cards.
+    disks: Vec<(String, Vec<f64>)>,
 }
 
 impl History {
@@ -82,6 +109,24 @@ impl History {
             &mut self.gpu,
             snapshot.gpu.as_ref().map_or(0.0, |gpu| gpu.usage),
         );
+        // A disk keeps its line wherever its card moves to; one that is
+        // taken away loses it, and starts again if it comes back.
+        let shown = shown_disks(snapshot);
+        let mut disks = Vec::with_capacity(shown.len());
+        for disk in &shown {
+            let mut series = self
+                .disks
+                .iter_mut()
+                .find(|(mountpoint, _)| *mountpoint == disk.mountpoint)
+                .map(|(_, series)| std::mem::take(series))
+                .unwrap_or_default();
+            keep(
+                &mut series,
+                disk_throughput(disk, &shown, snapshot).unwrap_or(0.0),
+            );
+            disks.push((disk.mountpoint.clone(), series));
+        }
+        self.disks = disks;
     }
 
     fn of(&self, series: Series) -> &[f64] {
@@ -92,6 +137,7 @@ impl History {
             Series::Sent => &self.sent,
             Series::Received => &self.received,
             Series::Gpu => &self.gpu,
+            Series::Disk(row) => self.disks.get(row).map_or(&[], |(_, series)| series),
         }
     }
 
@@ -102,7 +148,9 @@ impl History {
             Series::Cpu => Scale::AtLeast(25.0).top(&[&self.cpu]),
             Series::Gpu => Scale::AtLeast(25.0).top(&[&self.gpu]),
             Series::Memory => Scale::Top(100.0).top(&[]),
-            Series::DiskIo => Scale::AtLeast(1024.0 * 1024.0).top(&[&self.disk_io]),
+            Series::DiskIo | Series::Disk(_) => {
+                Scale::AtLeast(1024.0 * 1024.0).top(&[self.of(series)])
+            }
             Series::Sent | Series::Received => {
                 Scale::AtLeast(64.0 * 1024.0).top(&[&self.sent, &self.received])
             }
@@ -205,20 +253,9 @@ pub fn show(ui: &CompactWindow, snapshot: &Snapshot) {
         .into(),
     );
 
-    let disk = Usage::of(snapshot.disk.used, snapshot.disk.total, snapshot.disk.free);
-    let disk_io = snapshot.disk_io.read_bytes_per_sec + snapshot.disk_io.write_bytes_per_sec;
-    ui.set_disk_value(percent(snapshot.disk.percent).into());
-    ui.set_disk_share(snapshot.disk.percent as f32);
-    ui.set_disk_detail(
-        format!(
-            "{} / {} {} · {}",
-            disk.used,
-            disk.total,
-            disk.unit,
-            rate(disk_io as f64)
-        )
-        .into(),
-    );
+    show_rows(&ui.get_disks(), disk_rows(snapshot), |rows| {
+        ui.set_disks(rows)
+    });
 
     ui.set_network_down(format!("↓ {}", rate(snapshot.network.rx_bytes_per_sec as f64)).into());
     ui.set_network_up(format!("↑ {}", rate(snapshot.network.tx_bytes_per_sec as f64)).into());
@@ -248,6 +285,126 @@ fn changed<T: Clone + PartialEq + 'static>(shown: &ModelRc<T>, rows: Vec<T>) -> 
         return None;
     }
     Some(ModelRc::new(VecModel::from(rows)))
+}
+
+/// Shows ``rows`` in the list the layout holds as ``shown``. While there
+/// are as many rows as before, each one that reads differently is changed
+/// where it is, which leaves the layout's cards standing; only a
+/// different number of rows has ``replace`` hand it a new list.
+fn show_rows<T: Clone + PartialEq + 'static>(
+    shown: &ModelRc<T>,
+    rows: Vec<T>,
+    replace: impl FnOnce(ModelRc<T>),
+) {
+    if shown.row_count() != rows.len() {
+        return replace(ModelRc::new(VecModel::from(rows)));
+    }
+    for (index, row) in rows.into_iter().enumerate() {
+        if shown.row_data(index).as_ref() != Some(&row) {
+            shown.set_row_data(index, row);
+        }
+    }
+}
+
+/// How many Disk cards ``snapshot`` fills.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn disk_cards(snapshot: &Snapshot) -> usize {
+    shown_disks(snapshot).len().max(1)
+}
+
+/// The disks that get a card each, in the order of the cards: the
+/// collector's list (the primary disk first) without what isn't a disk
+/// to its owner. That is anything of no size (a card reader with no card
+/// in it), Linux's loop devices (snap packages), and a device already
+/// listed under another mount point.
+fn shown_disks(snapshot: &Snapshot) -> Vec<&DiskInfo> {
+    let mut shown: Vec<&DiskInfo> = Vec::new();
+    for disk in &snapshot.disks {
+        let sized = disk.total.is_finite() && disk.total > 0.0;
+        let listed = shown.iter().any(|other| other.device == disk.device);
+        if sized && !listed && !disk.device.starts_with("/dev/loop") {
+            shown.push(disk);
+        }
+    }
+    shown
+}
+
+/// What ``disk`` is reading and writing, in bytes a second, where that
+/// is known. A machine's only disk does all of the machine's reading
+/// and writing, so there the total stands in for a figure of its own.
+fn disk_throughput(disk: &DiskInfo, shown: &[&DiskInfo], snapshot: &Snapshot) -> Option<f64> {
+    let both =
+        |io: &crate::snapshot::DiskIo| (io.read_bytes_per_sec + io.write_bytes_per_sec) as f64;
+    match &disk.io {
+        Some(io) => Some(both(io)),
+        None if shown.len() == 1 => Some(both(&snapshot.disk_io)),
+        None => None,
+    }
+}
+
+/// Which disk a card is for: where it is mounted, and what its owner
+/// called it if anything. "C: · Games", or "/home".
+fn disk_name(disk: &DiskInfo) -> String {
+    let mountpoint = match disk.mountpoint.trim_end_matches('\\') {
+        "" => disk.mountpoint.as_str(),
+        trimmed => trimmed,
+    };
+    if disk.label.is_empty() {
+        mountpoint.to_string()
+    } else {
+        format!("{mountpoint} · {}", disk.label)
+    }
+}
+
+/// The Disk cards: one for each shown disk, or one for the primary disk
+/// alone from a collector that lists none.
+fn disk_rows(snapshot: &Snapshot) -> Vec<DiskRow> {
+    let row = |name: String, used, total, free, share: f64, io: Option<f64>, series: Series| {
+        let usage = Usage::of(used, total, free);
+        let mut detail = format!("{} / {} {}", usage.used, usage.total, usage.unit);
+        if let Some(io) = io {
+            detail.push_str(" · ");
+            detail.push_str(&rate(io));
+        }
+        DiskRow {
+            name: name.into(),
+            value: percent(share).into(),
+            detail: detail.into(),
+            share: share as f32,
+            // Nothing to draw for a disk whose reads and writes aren't
+            // known.
+            series: if io.is_some() { series.index() } else { -1 },
+        }
+    };
+    let shown = shown_disks(snapshot);
+    if shown.is_empty() {
+        let disk = &snapshot.disk;
+        let io = snapshot.disk_io.read_bytes_per_sec + snapshot.disk_io.write_bytes_per_sec;
+        return vec![row(
+            String::new(),
+            disk.used,
+            disk.total,
+            disk.free,
+            disk.percent,
+            Some(io as f64),
+            Series::DiskIo,
+        )];
+    }
+    shown
+        .iter()
+        .enumerate()
+        .map(|(index, disk)| {
+            row(
+                disk_name(disk),
+                disk.used,
+                disk.total,
+                disk.free,
+                disk.percent,
+                disk_throughput(disk, &shown, snapshot),
+                Series::Disk(index),
+            )
+        })
+        .collect()
 }
 
 /// Has the sparklines drawn again, after ``History::remember``.
@@ -560,11 +717,12 @@ fn rate(bytes_per_second: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        History, Series, Unit, Usage, cpu_detail, gpu_model, memory_name, overall, percent,
-        process_memory, process_rows, rate, service_row, short_uptime, size, status,
+        History, Series, Unit, Usage, cpu_detail, disk_cards, disk_rows, gpu_model, memory_name,
+        overall, percent, process_memory, process_rows, rate, service_row, short_uptime, size,
+        status,
     };
     use crate::server::probes::ProbeResult;
-    use crate::snapshot::{Gpu, Process, ProcessCpu, Snapshot};
+    use crate::snapshot::{DiskInfo, DiskIo, Gpu, Process, ProcessCpu, Snapshot};
 
     #[test]
     fn uptime_is_shortened_to_initials() {
@@ -753,6 +911,144 @@ mod tests {
         history.remember(&snapshot);
         assert_eq!(history.of(Series::Gpu), [0.0, 80.0]);
         assert_eq!(history.top(Series::Gpu), 80.0 * 1.15);
+    }
+
+    /// A disk half full, reading and writing ``bytes`` a second between
+    /// them, or not saying if ``None``.
+    fn disk(mountpoint: &str, label: &str, total: f64, bytes: Option<u64>) -> DiskInfo {
+        DiskInfo {
+            device: mountpoint.into(),
+            mountpoint: mountpoint.into(),
+            label: label.into(),
+            fstype: "NTFS".into(),
+            total,
+            used: total / 2.0,
+            free: total / 2.0,
+            percent: 50.0,
+            io: bytes.map(|bytes| DiskIo {
+                read_bytes_per_sec: bytes / 4,
+                write_bytes_per_sec: bytes - bytes / 4,
+                ..DiskIo::default()
+            }),
+        }
+    }
+
+    /// What the cards say: each one's name, detail and series.
+    fn said(snapshot: &Snapshot) -> Vec<(String, String, i32)> {
+        disk_rows(snapshot)
+            .iter()
+            .map(|row| (row.name.to_string(), row.detail.to_string(), row.series))
+            .collect()
+    }
+
+    #[test]
+    fn every_disk_has_a_card_with_its_own_reads_and_writes() {
+        let mut snapshot = Snapshot::default();
+        snapshot.disk_io.read_bytes_per_sec = 9 * 1024 * 1024;
+        snapshot.disks = vec![
+            disk("C:\\", "", 475.1, Some(2 * 1024 * 1024)),
+            disk("D:\\", "Games", 1863.0, Some(0)),
+            disk("E:\\", "Backup", 931.5, None),
+        ];
+        assert_eq!(
+            said(&snapshot),
+            [
+                ("C:".into(), "237.6 / 475.1 GiB · 2.00 MB/s".into(), 100),
+                ("D: · Games".into(), "0.9 / 1.8 TiB · 0 B/s".into(), 101),
+                // No figure and no sparkline where the disk doesn't say.
+                ("E: · Backup".into(), "465.8 / 931.5 GiB".into(), -1),
+            ]
+        );
+        assert_eq!(disk_rows(&snapshot)[1].value, "50.0");
+        assert_eq!(disk_rows(&snapshot)[1].share, 50.0);
+        assert_eq!(disk_cards(&snapshot), 3);
+    }
+
+    #[test]
+    fn only_real_disks_get_a_card() {
+        let mut snapshot = Snapshot::default();
+        let on = |device: &str, mountpoint: &str, total: f64| DiskInfo {
+            device: device.into(),
+            ..disk(mountpoint, "", total, Some(0))
+        };
+        snapshot.disks = vec![
+            on("/dev/nvme0n1p2", "/", 475.1),
+            // The same partition again, a snap package and an empty slot.
+            on("/dev/nvme0n1p2", "/var/lib/docker", 475.1),
+            on("/dev/loop3", "/snap/core22/1122", 0.07),
+            on("/dev/sdb1", "/media/card", 0.0),
+            on("/dev/sda1", "/home", 1863.0),
+        ];
+        let names: Vec<_> = said(&snapshot).into_iter().map(|row| row.0).collect();
+        assert_eq!(names, ["/", "/home"]);
+    }
+
+    #[test]
+    fn a_machine_that_lists_no_disks_shows_its_primary_one() {
+        let mut snapshot = Snapshot::default();
+        snapshot.disk.total = 475.1;
+        snapshot.disk.used = 400.1;
+        snapshot.disk.free = 75.0;
+        snapshot.disk.percent = 84.2;
+        snapshot.disk_io.write_bytes_per_sec = 1_331_692;
+        assert_eq!(
+            said(&snapshot),
+            [(
+                String::new(),
+                "400.1 / 475.1 GiB · 1.27 MB/s".into(),
+                Series::DiskIo.index()
+            )]
+        );
+        assert_eq!(disk_rows(&snapshot)[0].value, "84.2");
+        assert_eq!(disk_cards(&snapshot), 1);
+    }
+
+    #[test]
+    fn an_only_disk_that_does_not_say_takes_the_machines_total() {
+        let mut snapshot = Snapshot::default();
+        snapshot.disk_io.read_bytes_per_sec = 5 * 1024 * 1024;
+        snapshot.disks = vec![disk("/", "", 100.0, None)];
+        assert_eq!(
+            said(&snapshot),
+            [("/".into(), "50.0 / 100.0 GiB · 5.00 MB/s".into(), 100)]
+        );
+        let mut history = History::default();
+        history.remember(&snapshot);
+        assert_eq!(history.of(Series::Disk(0)), [5.0 * 1024.0 * 1024.0]);
+    }
+
+    #[test]
+    fn a_disks_line_follows_the_disk() {
+        let mut history = History::default();
+        let mut snapshot = Snapshot {
+            disks: vec![
+                disk("C:\\", "", 475.1, Some(100)),
+                disk("D:\\", "", 931.5, Some(200)),
+                disk("E:\\", "", 931.5, Some(300)),
+            ],
+            ..Snapshot::default()
+        };
+        history.remember(&snapshot);
+        history.remember(&snapshot);
+        assert_eq!(history.of(Series::Disk(1)), [200.0, 200.0]);
+        assert_eq!(history.of(Series::Disk(2)), [300.0, 300.0]);
+        // D: is unplugged: E: moves up a card and keeps its line.
+        snapshot.disks.remove(1);
+        history.remember(&snapshot);
+        assert_eq!(history.of(Series::Disk(1)), [300.0, 300.0, 300.0]);
+        assert!(history.of(Series::Disk(2)).is_empty());
+        // Back again, it starts a new one.
+        snapshot.disks.insert(1, disk("D:\\", "", 931.5, Some(200)));
+        history.remember(&snapshot);
+        assert_eq!(history.of(Series::Disk(1)), [200.0]);
+        // Each is drawn against its own busiest second, a megabyte at least.
+        assert_eq!(history.top(Series::Disk(1)), 1024.0 * 1024.0);
+        assert_eq!(
+            Series::from_index(Series::Disk(2).index()),
+            Some(Series::Disk(2))
+        );
+        assert_eq!(Series::from_index(5), Some(Series::Gpu));
+        assert_eq!(Series::from_index(6), None);
     }
 
     fn probe(ok: bool, latency_ms: u64) -> ProbeResult {

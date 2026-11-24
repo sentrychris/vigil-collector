@@ -95,6 +95,7 @@ every field is always present in the payload:
 |---|---|---|---|
 | Disk usage | `statvfs` (psutil/df arithmetic) | `GetDiskFreeSpaceExW` | `statvfs` |
 | Disk I/O + IOPS | `/proc/diskstats`, whole disks | `IOCTL_DISK_PERFORMANCE` on `\\.\PhysicalDriveN` | zeros |
+| Disk I/O per partition | `/proc/diskstats`, the partition's row | `IOCTL_DISK_PERFORMANCE` on `\\.\C:` | left out |
 | CPU temperature | sysinfo components, then `/sys/class/thermal` | HWiNFO / Afterburner shared memory, LibreHardwareMonitor WMI, live ACPI thermal zone, else `0` | sysinfo components |
 | GPU | `/sys/class/drm` (`amdgpu`), else `null` | "GPU Engine" / "GPU Adapter Memory" PDH counters, `D3DKMT` for name, memory size and temperature | `null` |
 | GPU per process | left out | the same counters, by pid | left out |
@@ -141,7 +142,7 @@ copies, no syscalls, no locks.
 The three buffers exist because the wire formats differ:
 
 - `http_system` — full payload for `GET /system` ([HttpSystemView](../src/snapshot.rs)).
-- `ws_system` — slimmer WebSocket frame; `uptime` is top-level, no `disks` /
+- `ws_system` — slimmer WebSocket frame; `uptime` is top-level, no
   `user` / `platform` ([WsSystemView](../src/snapshot.rs)).
 - `network` — interface list + per-iface stats for `GET /network`
   ([NetworkView](../src/snapshot.rs)).
@@ -383,6 +384,14 @@ renderer, with no WebView2, no GPU and no windowing library.
   posts the window a message per reading and the window reads the
   snapshot itself. Service checks run on the runtime thread
   (`probes::run`) and come back over a channel the same way.
+- **A card per disk.** The Disk cards are a list (`DiskRow` in the
+  layout), one for each disk `view.rs` picks from the snapshot's `disks`:
+  everything listed except what has no size, Linux's loop devices and a
+  device already shown under another mount point. Each has a sparkline of
+  its own reads and writes, kept by mount point so it stays with its disk
+  when another is unplugged. Rows are changed where they stand; only a
+  different number of disks builds the cards again. The window's first
+  size allows for up to four.
 - **The frame** is shared with the full dashboard's window
   ([frame.rs](../src/frame.rs)): `WM_NCCALCSIZE` removes the title bar,
   and `WM_NCHITTEST` says which parts of the picture stand in for it

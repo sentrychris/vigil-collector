@@ -267,8 +267,8 @@ In the tray, the log is written to the log file (see
 
 The window is a small monitor for a corner of the screen. It shows the
 platform, CPU, GPU (on a machine with a graphics card Vigil can read),
-memory, disk and network each on one line with the last
-minute as a sparkline, the service checks (one line while all is well;
+memory, every disk and network each on one line with the last
+minute as a sparkline (a disk's is its own reads and writes), the service checks (one line while all is well;
 press it to list them), and the busiest programs by CPU or memory (press
 a heading to sort by it).
 
@@ -492,7 +492,8 @@ Current snapshot of the host. Same payload that the WebSocket pushes.
 | `mem.manufacturer` | string | Who made the modules, e.g. `"Corsair"`; each maker in turn if they differ (`""` if unknown) |
 | `disk.total` / `used` / `free` | number | Primary partition (root or system drive), GiB |
 | `disk.percent` | number | Primary partition utilization, % |
-| `disks[]` | array | Every mounted partition: `device`, `mountpoint`, `fstype`, plus the same usage fields |
+| `disks[]` | array | Every mounted partition, the primary one first: `device`, `mountpoint`, `label` (the volume's name on Windows, `""` elsewhere), `fstype`, plus the same usage fields |
+| `disks[].io` | object | That partition's own reads and writes, with the same four fields as `disk_io`. Left out where its counters can't be read (see [Platform notes](#platform-notes)) |
 | `disk_io.read_bytes_per_sec` / `write_bytes_per_sec` | number | Aggregate disk throughput, bytes/sec |
 | `disk_io.read_iops` / `write_iops` | number | Aggregate disk operations/sec |
 | `network.rx_bytes_per_sec` | number | Receive throughput (loopback excluded) |
@@ -557,8 +558,8 @@ const worker = await fetch("http://localhost:4500/worker", { method: "POST" })
 const ws = new WebSocket(`ws://localhost:4500/connect?id=${worker.id}`);
 ws.onmessage = (event) => {
   const snapshot = JSON.parse(event.data);
-  // { cpu, gpu, mem, disk, disk_io, network, uptime, processes, processes_metric, processes_by_cpu,
-  //   processes_by_gpu (Windows) }
+  // { cpu, gpu, mem, disk, disks, disk_io, network, uptime, processes, processes_metric,
+  //   processes_by_cpu, processes_by_gpu (Windows) }
 };
 ```
 
@@ -572,6 +573,7 @@ WebSocket frees it. A connect refused with `503` (server at
 |---|---|---|---|
 | Disk usage | `statvfs`, `df`-exact | `GetDiskFreeSpaceExW` | `statvfs` |
 | Disk I/O + IOPS | `/proc/diskstats` | `IOCTL_DISK_PERFORMANCE` per physical drive | not reported (`0`) |
+| Disk I/O per partition | `/proc/diskstats`, the partition's own row | `IOCTL_DISK_PERFORMANCE` per drive letter; not for a volume mounted in a folder | not reported |
 | CPU temperature | hwmon / thermal zones | from a monitoring app or a live ACPI thermal zone, else `0` (see below) | SMC sensors |
 | GPU | AMD cards (`amdgpu`), else `null` | any card, from Windows' own counters | `null` |
 | GPU use per process | not reported | yes | not reported |
@@ -797,8 +799,9 @@ window is the contract):
 
 - CPU usage % (from `/proc/stat` global counters; PDH counters on Windows)
 - Memory used/free
-- Disk I/O bytes/sec and IOPS (from `/proc/diskstats` deltas;
-  `IOCTL_DISK_PERFORMANCE` on Windows)
+- Disk I/O bytes/sec and IOPS, for the machine and for each listed
+  partition (from `/proc/diskstats` deltas; `IOCTL_DISK_PERFORMANCE` on
+  Windows)
 - Network rx/tx bytes/sec (from sysinfo's per-iface counter deltas)
 
 The per-disk usage walk runs every tick too, but it's only

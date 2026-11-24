@@ -98,18 +98,26 @@ pub struct Disk {
     pub percent: f64,
 }
 
-#[derive(Serialize, Clone, Debug)]
+#[derive(Serialize, Clone, Debug, Default)]
 pub struct DiskInfo {
     pub device: String,
     pub mountpoint: String,
+    /// The name its owner gave the volume ("Games"), where it has one.
+    /// Windows only; empty elsewhere.
+    pub label: String,
     pub fstype: String,
     pub total: f64,
     pub used: f64,
     pub free: f64,
     pub percent: f64,
+    /// Reads and writes of this volume alone, in the same terms as the
+    /// machine's ``disk_io``. Left out of the payload where its counters
+    /// can't be read (see ``metrics/disk.rs``).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub io: Option<DiskIo>,
 }
 
-#[derive(Serialize, Clone, Debug, Default)]
+#[derive(Serialize, Clone, Debug, Default, PartialEq)]
 pub struct DiskIo {
     pub read_bytes_per_sec: u64,
     pub write_bytes_per_sec: u64,
@@ -192,8 +200,9 @@ pub struct HttpSystemView<'a> {
     pub processes_by_gpu: &'a [Process],
 }
 
-/// WebSocket frame projection. Mirrors ``server/websocket/system.py`` —
-/// note: no `disks`, no `user`, no `platform`; `uptime` is top-level.
+/// WebSocket frame projection. Mirrors ``server/websocket/system.py``,
+/// with ``disks`` added — note: no `user`, no `platform`; `uptime` is
+/// top-level.
 #[derive(Serialize)]
 pub struct WsSystemView<'a> {
     pub cpu: &'a Cpu,
@@ -201,6 +210,7 @@ pub struct WsSystemView<'a> {
     pub gpu: Option<&'a Gpu>,
     pub mem: &'a Mem,
     pub disk: &'a Disk,
+    pub disks: &'a [DiskInfo],
     pub disk_io: &'a DiskIo,
     pub network: &'a Throughput,
     pub uptime: &'a str,
@@ -243,6 +253,7 @@ impl Snapshot {
             gpu: self.gpu.as_ref(),
             mem: &self.mem,
             disk: &self.disk,
+            disks: &self.disks,
             disk_io: &self.disk_io,
             network: &self.network,
             uptime: &self.uptime,
@@ -263,7 +274,7 @@ impl Snapshot {
 
 #[cfg(test)]
 mod tests {
-    use super::{Cpu, Gpu, GpuMemory, Process, Snapshot};
+    use super::{Cpu, DiskInfo, DiskIo, Gpu, GpuMemory, Process, Snapshot};
 
     #[test]
     fn missing_temperature_serializes_as_integer_zero() {
@@ -328,6 +339,44 @@ mod tests {
             serde_json::to_value(snapshot.ws_view()).unwrap()["gpu"],
             expected
         );
+    }
+
+    #[test]
+    fn every_disk_is_in_both_payloads_with_its_own_reads_and_writes() {
+        let disk = |mountpoint: &str, io: Option<DiskIo>| DiskInfo {
+            device: mountpoint.into(),
+            mountpoint: mountpoint.into(),
+            label: "Games".into(),
+            io,
+            ..DiskInfo::default()
+        };
+        let snapshot = Snapshot {
+            disks: vec![
+                disk(
+                    "C:\\",
+                    Some(DiskIo {
+                        read_bytes_per_sec: 4096,
+                        write_bytes_per_sec: 512,
+                        read_iops: 2,
+                        write_iops: 1,
+                    }),
+                ),
+                disk("D:\\", None),
+            ],
+            ..Snapshot::default()
+        };
+        for json in [
+            serde_json::to_value(snapshot.http_view()).unwrap(),
+            serde_json::to_value(snapshot.ws_view()).unwrap(),
+        ] {
+            let disks = json["disks"].as_array().unwrap();
+            assert_eq!(disks.len(), 2);
+            assert_eq!(disks[0]["label"], "Games");
+            assert_eq!(disks[0]["io"]["read_bytes_per_sec"], 4096);
+            assert_eq!(disks[0]["io"]["write_iops"], 1);
+            // A volume whose counters can't be read says nothing of them.
+            assert!(!disks[1].as_object().unwrap().contains_key("io"));
+        }
     }
 
     #[test]

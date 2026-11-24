@@ -5,6 +5,7 @@ import type { ProcessMetric } from "@/interfaces/types/SystemTypes";
 import { defineStore } from "pinia";
 import { useLoadingStore } from "./loading";
 import { config } from "@/config";
+import { diskThroughput, shownDisks } from "@/utilities/hardware";
 
 /** How many readings the compact window's sparklines keep: a minute's
  *  worth at the collector's usual one a second. */
@@ -38,6 +39,7 @@ export const useSystemStore = defineStore("system", {
         free: 0,
         percent: 0,
       },
+      disks: [],
       network: {
         rx_bytes_per_sec: 0,
         tx_bytes_per_sec: 0,
@@ -60,6 +62,8 @@ export const useSystemStore = defineStore("system", {
       gpu: [] as number[],
       mem: [] as number[],
       diskIo: [] as number[],
+      // Each shown disk's own reads and writes, by its mount point.
+      disks: {} as Record<string, number[]>,
       rx: [] as number[],
       tx: [] as number[],
     },
@@ -188,6 +192,7 @@ export const useSystemStore = defineStore("system", {
       this.realtime.processes = realtime.processes;
       this.realtime.processes_by_cpu = realtime.processes_by_cpu ?? [];
       this.realtime.processes_by_gpu = realtime.processes_by_gpu ?? [];
+      this.realtime.disks = realtime.disks ?? [];
       remember(this.history.cpu, realtime.cpu?.usage);
       remember(this.history.gpu, realtime.gpu?.usage ?? 0);
       remember(this.history.mem, realtime.mem?.percent);
@@ -195,6 +200,16 @@ export const useSystemStore = defineStore("system", {
         this.history.diskIo,
         (realtime.disk_io?.read_bytes_per_sec ?? 0) + (realtime.disk_io?.write_bytes_per_sec ?? 0),
       );
+      // A disk keeps its line while it is listed; one that is taken away
+      // loses it, and starts again if it comes back.
+      const shown = shownDisks(realtime.disks);
+      const disks: Record<string, number[]> = {};
+      for (const disk of shown) {
+        const series = this.history.disks[disk.mountpoint] ?? [];
+        remember(series, diskThroughput(disk, shown, realtime.disk_io) ?? 0);
+        disks[disk.mountpoint] = series;
+      }
+      this.history.disks = disks;
       remember(this.history.rx, realtime.network?.rx_bytes_per_sec ?? 0);
       remember(this.history.tx, realtime.network?.tx_bytes_per_sec ?? 0);
     },

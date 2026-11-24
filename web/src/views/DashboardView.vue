@@ -339,7 +339,13 @@ onBeforeMount(() => {
                 tone="green"
               />
               <div class="panel-body">
-                <DiskList :disks="system.data.disks ?? []" />
+                <DiskList
+                  :disks="
+                    system.live && system.realtime.disks?.length
+                      ? system.realtime.disks
+                      : (system.data.disks ?? [])
+                  "
+                />
               </div>
             </div>
           </div>

@@ -9,7 +9,7 @@ import { useSystemStore } from "@/stores/system";
 import { formatSize } from "@/utilities/format-size";
 import { formatRate } from "@/utilities/format-rate";
 import { mapTemperatureColor } from "@/utilities/color-map";
-import { gpuModel, memoryName } from "@/utilities/hardware";
+import { diskName, diskThroughput, gpuModel, memoryName, shownDisks } from "@/utilities/hardware";
 import CompactCard from "./CompactCard.vue";
 import CompactProcesses from "./CompactProcesses.vue";
 import CompactServices from "./CompactServices.vue";
@@ -62,12 +62,45 @@ const memory = computed(() => usage(now.value.mem));
 // The graphics card, on a machine that has one the collector can read.
 const gpu = computed(() => now.value.gpu ?? null);
 const gpuMemory = computed(() => usage(gpu.value?.mem));
-const disk = computed(() => usage(now.value.disk));
 
 const rate = (bytes: number | undefined) => formatRate(bytes ?? 0);
-const diskIo = computed(() =>
-  rate((now.value.disk_io?.read_bytes_per_sec ?? 0) + (now.value.disk_io?.write_bytes_per_sec ?? 0)),
-);
+
+// The Disk cards: one for each disk the collector lists, or one for the
+// primary disk alone from a collector that lists none. Live readings
+// carry the list only from newer collectors; until then it is as it was
+// when the page loaded.
+const disks = computed(() => {
+  const live = system.live ? system.realtime.disks : undefined;
+  const listed = shownDisks(live?.length ? live : system.data.disks);
+  if (!listed.length) {
+    const io = now.value.disk_io;
+    return [
+      {
+        key: "",
+        name: undefined,
+        percent: now.value.disk?.percent,
+        usage: usage(now.value.disk),
+        io: rate((io?.read_bytes_per_sec ?? 0) + (io?.write_bytes_per_sec ?? 0)),
+        ioTitle: "Reads and writes, all disks",
+        history: system.history.diskIo,
+      },
+    ];
+  }
+  return listed.map((disk) => {
+    // Nothing to say or draw for a disk whose reads and writes aren't
+    // known.
+    const throughput = diskThroughput(disk, listed, now.value.disk_io);
+    return {
+      key: disk.mountpoint,
+      name: diskName(disk),
+      percent: disk.percent,
+      usage: usage(disk),
+      io: throughput === null ? null : rate(throughput),
+      ioTitle: "Reads and writes",
+      history: throughput === null ? null : (system.history.disks[disk.mountpoint] ?? []),
+    };
+  });
+});
 const rx = computed(() => rate(now.value.network?.rx_bytes_per_sec));
 const tx = computed(() => rate(now.value.network?.tx_bytes_per_sec));
 
@@ -159,22 +192,27 @@ const TX = "var(--t-rose)";
     </CompactCard>
 
     <CompactCard
+      v-for="disk in disks"
+      :key="disk.key"
       title="Disk"
+      :name="disk.name"
       icon="fa-solid fa-hard-drive"
       tone="green"
-      :value="percent(now.disk?.percent, 1)"
+      :value="percent(disk.percent, 1)"
       unit="%"
-      :bar="now.disk?.percent ?? 0"
+      :bar="disk.percent ?? 0"
     >
       <template #sub>
-        {{ disk.used }} / {{ disk.total }} {{ disk.unit }} ·
-        <span title="Reads and writes, all disks">{{ diskIo.value }} {{ diskIo.unit }}</span>
+        {{ disk.usage.used }} / {{ disk.usage.total }} {{ disk.usage.unit }}<template v-if="disk.io">
+          ·
+          <span :title="disk.ioTitle">{{ disk.io.value }} {{ disk.io.unit }}</span>
+        </template>
       </template>
-      <template #spark>
+      <template v-if="disk.history" #spark>
         <SparkLine
-          :series="[{ values: system.history.diskIo, color: 'var(--t-green)' }]"
+          :series="[{ values: disk.history, color: 'var(--t-green)' }]"
           :floor="1024 * 1024"
-          label="Disk reads and writes over the last minute"
+          :label="`Reads and writes${disk.name ? ` of ${disk.name}` : ''} over the last minute`"
         />
       </template>
     </CompactCard>

@@ -43,6 +43,11 @@ const MIN_SIZE: (i32, i32) = (360, 300);
 /// How much taller the first size is on a machine with a graphics card,
 /// which has a card more to fit: the card and the gap under it.
 const GPU_CARD_HEIGHT: i32 = 46 + 6;
+/// And for each disk after the first, which has a card of its own with a
+/// bar along the bottom. No more than this many are made room for: with
+/// more, the window scrolls rather than outgrow the screen.
+const DISK_CARD_HEIGHT: i32 = 55 + 6;
+const DISK_CARDS_FITTED: usize = 4;
 
 /// Posted by the collector's thread: there are new readings.
 const WM_READINGS: u32 = WM_APP + 1;
@@ -185,11 +190,7 @@ fn raise(feed: &Feed, look: WindowLook, place: Option<WindowPlace>) -> Result<Rc
             style: WS_OVERLAPPEDWINDOW & !WS_MAXIMIZEBOX,
             procedure: Some(window_proc),
             place,
-            size: if feed.readings.borrow().gpu.is_some() {
-                (DEFAULT_SIZE.0, DEFAULT_SIZE.1 + GPU_CARD_HEIGHT)
-            } else {
-                DEFAULT_SIZE
-            },
+            size: first_size(&feed.readings.borrow()),
         })?
     };
     let link = Rc::new(RefCell::new(None));
@@ -229,6 +230,21 @@ fn raise(feed: &Feed, look: WindowLook, place: Option<WindowPlace>) -> Result<Rc
     unsafe { SetTimer(hwnd, PAUSED_TIMER, PAUSED_EVERY_MS, None) };
     frame::bring_forward(hwnd);
     Ok(open)
+}
+
+/// The size the window opens at the first time: tall enough for every
+/// card this machine has.
+fn first_size(readings: &Snapshot) -> (i32, i32) {
+    let gpu = if readings.gpu.is_some() {
+        GPU_CARD_HEIGHT
+    } else {
+        0
+    };
+    let more_disks = view::disk_cards(readings).min(DISK_CARDS_FITTED) as i32 - 1;
+    (
+        DEFAULT_SIZE.0,
+        DEFAULT_SIZE.1 + gpu + more_disks * DISK_CARD_HEIGHT,
+    )
 }
 
 /// Connects the layout's buttons and switches to the window.
