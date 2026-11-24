@@ -41,6 +41,9 @@ export global Charts {
 
 component Card inherits Rectangle {
     in property <string> title;
+    // What the part is called (the processor's model, say), written small
+    // after the title in whatever room the line has left.
+    in property <string> name;
     in property <Glyph> glyph;
     // The Windows mark instead of a glyph, for the platform card.
     in property <bool> windows-mark;
@@ -147,6 +150,18 @@ component Card inherits Rectangle {
             font-weight: 700;
             letter-spacing: 0.99px;
             color: Theme.text;
+            overflow: elide;
+        }
+        // It takes no part in how wide the text asks to be, so a long
+        // name is cut short rather than squeezing the sparkline.
+        if root.name != "" && parent.width - heading.width > 40px: Text {
+            x: heading.width + 7px;
+            y: 3px;
+            width: parent.width - self.x;
+            text: root.name;
+            font-size: 10px;
+            font-weight: 500;
+            color: Theme.muted;
             overflow: elide;
         }
         subline := HorizontalLayout {
@@ -486,6 +501,8 @@ export struct ProcessRow {
     // The length of its bar, from 0 to 100: its share of the busiest.
     share: float,
     cpu: string,
+    // Its share of the graphics card, or empty where that isn't known.
+    gpu: string,
     mem: string,
     mem-unit: string,
 }
@@ -515,6 +532,10 @@ component SortHeading inherits Rectangle {
 component Processes inherits Rectangle {
     in property <[ProcessRow]> by-cpu;
     in property <[ProcessRow]> by-memory;
+    // Whether to show each process's share of the graphics card.
+    in property <bool> gpu;
+    // The room the figures take on the right of each line.
+    property <length> figures: root.gpu ? 182px : 130px;
     property <bool> sort-by-cpu: true;
     property <bool> show-all;
     // How many lines to show until asked for them all.
@@ -595,13 +616,26 @@ component Processes inherits Rectangle {
                 vertical-alignment: center;
             }
             SortHeading {
-                x: parent.width - 78px - 52px;
+                x: parent.width - root.figures;
                 width: 52px;
                 label: "CPU";
                 active: root.sort-by-cpu;
                 chosen => {
                     root.sort-by-cpu = true;
                 }
+            }
+            // The list comes sorted by processor or by memory, so this
+            // one is a heading only.
+            if root.gpu: Text {
+                x: parent.width - 78px - 52px;
+                width: 42px;
+                text: "GPU";
+                font-family: Type.mono-semibold;
+                font-size: 9.5px;
+                letter-spacing: 1.14px;
+                color: Theme.dim;
+                horizontal-alignment: right;
+                vertical-alignment: center;
             }
             SortHeading {
                 x: parent.width - 78px;
@@ -637,18 +671,41 @@ component Processes inherits Rectangle {
             Meter {
                 x: 10px + parent.name-width + 10px;
                 y: 9px;
-                width: max(0px, parent.width - self.x - 10px - 52px - 78px);
+                width: max(0px, parent.width - self.x - 10px - root.figures);
                 height: 4px;
                 share: row.share;
                 tone: Theme.green;
             }
             HorizontalLayout {
-                x: parent.width - 78px - 52px;
+                x: parent.width - root.figures;
                 width: 42px;
                 alignment: end;
                 spacing: 3px;
                 Text {
                     text: row.cpu;
+                    font-family: Type.mono;
+                    font-size: 11px;
+                    color: Theme.text;
+                    vertical-alignment: center;
+                }
+                VerticalLayout {
+                    alignment: center;
+                    padding-top: 1px;
+                    Text {
+                        text: "%";
+                        font-family: Type.mono;
+                        font-size: 9.5px;
+                        color: Theme.muted;
+                    }
+                }
+            }
+            if root.gpu: HorizontalLayout {
+                x: parent.width - 78px - 52px;
+                width: 42px;
+                alignment: end;
+                spacing: 3px;
+                Text {
+                    text: row.gpu == "" ? "–" : row.gpu;
                     font-family: Type.mono;
                     font-size: 11px;
                     color: Theme.text;
@@ -866,12 +923,23 @@ export component CompactWindow inherits Window {
     in property <string> uptime: "–";
 
     in property <string> cpu-value: "–";
+    in property <string> cpu-name;
     in property <string> cpu-detail;
     // The temperature, with its separator, when there is a sensor.
     in property <string> cpu-temperature;
     in property <color> cpu-temperature-color;
 
+    // The graphics card, on a machine that has one Vigil can read.
+    in property <bool> gpu-shown;
+    in property <string> gpu-value: "–";
+    in property <string> gpu-name;
+    in property <string> gpu-detail;
+    in property <string> gpu-temperature;
+    in property <color> gpu-temperature-color;
+
     in property <string> memory-value: "–";
+    // What is fitted: "DDR4 · Corsair".
+    in property <string> memory-name;
     in property <string> memory-detail;
     in property <float> memory-share;
 
@@ -888,6 +956,7 @@ export component CompactWindow inherits Window {
 
     in property <[ProcessRow]> processes-by-cpu;
     in property <[ProcessRow]> processes-by-memory;
+    in property <bool> processes-gpu;
 
     // For the program's own hit testing: the bar's height, and how far
     // from the left it is bare (see TitleBar).
@@ -935,6 +1004,7 @@ export component CompactWindow inherits Window {
             }
             Card {
                 title: "CPU";
+                name: root.cpu-name;
                 glyph: Icons.microchip;
                 tone: Theme.purple;
                 tint: #a855f7;
@@ -946,8 +1016,23 @@ export component CompactWindow inherits Window {
                 sub-3-color: root.cpu-temperature-color;
                 series: 0;
             }
+            if root.gpu-shown: Card {
+                title: "GPU";
+                name: root.gpu-name;
+                glyph: Icons.gpu-card;
+                tone: Theme.pink;
+                tint: #ec4899;
+                value: root.gpu-value;
+                unit: "%";
+                sub: root.gpu-detail;
+                sub-2: root.gpu-temperature != "" ? " · " : "";
+                sub-3: root.gpu-temperature;
+                sub-3-color: root.gpu-temperature-color;
+                series: 5;
+            }
             Card {
                 title: "MEMORY";
+                name: root.memory-name;
                 glyph: Icons.memory;
                 tone: Theme.amber;
                 tint: #f59e0b;
@@ -992,6 +1077,7 @@ export component CompactWindow inherits Window {
             Processes {
                 by-cpu: root.processes-by-cpu;
                 by-memory: root.processes-by-memory;
+                gpu: root.processes-gpu;
             }
         }
     }

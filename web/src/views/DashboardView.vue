@@ -8,6 +8,7 @@ import SectionHeader from "@/components/SectionHeader.vue";
 import StatCard from "@/components/stats/StatCard.vue";
 import PlatformDetail from "@/components/stats/PlatformDetail.vue";
 import CpuDetail from "@/components/stats/CpuDetail.vue";
+import GpuDetail from "@/components/stats/GpuDetail.vue";
 import UsageDetail from "@/components/stats/UsageDetail.vue";
 import GaugeChart from "@/components/charts/GaugeChart.vue";
 import RealtimeLineChart from "@/components/charts/RealtimeLineChart.vue";
@@ -20,6 +21,7 @@ import DiskList from "@/components/stats/DiskList.vue";
 import DataTable from "@/components/DataTable.vue";
 import CompactDashboard from "@/components/compact/CompactDashboard.vue";
 import { useCompactLayout } from "@/composables/useCompactLayout";
+import { memoryName } from "@/utilities/hardware";
 
 useDocumentTitle("Host Overview");
 
@@ -27,6 +29,13 @@ const loader = useLoadingStore();
 const system = useSystemStore();
 // The Vigil window at its usual small size gets a layout of its own.
 const { compact } = useCompactLayout();
+
+// The graphics card, on a machine that has one the collector can read.
+// With it the top row holds five cards instead of four.
+const gpu = computed(() => (system.live ? system.realtime.gpu : system.data.gpu) ?? null);
+const statColumn = computed(() =>
+  gpu.value ? "col-sm-12 col-md-6 col-lg" : "col-sm-12 col-md-6 col-lg-3",
+);
 
 const processesView = ref<"charts" | "table">("charts");
 const processesData = computed(() =>
@@ -53,7 +62,9 @@ onBeforeMount(() => {
       <!-- Top stat cards -->
       <section id="statistics" class="page-section mt-0">
         <div class="row g-2">
-          <div class="col-sm-12 col-md-6 col-lg-3 d-flex align-items-stretch">
+          <!-- Alone on its row at the width where the cards go two by
+               two, when there are five of them. -->
+          <div class="d-flex align-items-stretch" :class="[statColumn, { 'col-md-12': gpu }]">
             <StatCard title="Platform" icon="fa-solid fa-server" tone="blue">
               <template #detail>
                 <PlatformDetail
@@ -63,7 +74,7 @@ onBeforeMount(() => {
               </template>
             </StatCard>
           </div>
-          <div class="col-sm-12 col-md-6 col-lg-3 d-flex align-items-stretch">
+          <div class="d-flex align-items-stretch" :class="statColumn">
             <StatCard title="CPU" icon="fa-solid fa-microchip" tone="purple">
               <template #detail>
                 <CpuDetail
@@ -72,16 +83,24 @@ onBeforeMount(() => {
               </template>
             </StatCard>
           </div>
-          <div class="col-sm-12 col-md-6 col-lg-3 d-flex align-items-stretch">
+          <div v-if="gpu" class="d-flex align-items-stretch" :class="statColumn">
+            <StatCard title="GPU" icon="fa-solid fa-gpu-card" tone="pink">
+              <template #detail>
+                <GpuDetail :detail="gpu" />
+              </template>
+            </StatCard>
+          </div>
+          <div class="d-flex align-items-stretch" :class="statColumn">
             <StatCard title="Memory" icon="fa-solid fa-memory" tone="amber">
               <template #detail>
                 <UsageDetail
                   :detail="system.live ? system.realtime.mem : system.data.mem"
+                  :hardware="memoryName(system.data.mem) || undefined"
                 />
               </template>
             </StatCard>
           </div>
-          <div class="col-sm-12 col-md-6 col-lg-3 d-flex align-items-stretch">
+          <div class="d-flex align-items-stretch" :class="statColumn">
             <StatCard title="Disk" icon="fa-solid fa-hard-drive" tone="green">
               <template #detail>
                 <UsageDetail
@@ -119,6 +138,9 @@ onBeforeMount(() => {
                     "
                     format="{y}%"
                   />
+                </div>
+                <div v-if="gpu" class="resource-gauge-cell">
+                  <GaugeChart title="GPU" id="gpu" :metric="gpu.usage" format="{y}%" />
                 </div>
                 <div class="resource-gauge-cell">
                   <GaugeChart

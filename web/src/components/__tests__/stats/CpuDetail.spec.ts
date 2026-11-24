@@ -29,6 +29,14 @@ describe("CpuDetail", () => {
     expect(text).toContain("TEMP25.0°C");
   });
 
+  it("names the processor when the collector says what it is", () => {
+    expect(getWrapper().text()).not.toContain("MODEL");
+    const testSubject = mount(CpuDetail, {
+      props: { detail: { ...testProps.detail, name: "Intel Core i7-11700" } },
+    });
+    expect(testSubject.text()).toContain("MODELIntel Core i7-11700");
+  });
+
   it("shows n/a without a temperature sensor", () => {
     const testSubject = mount(CpuDetail, {
       props: { detail: { ...testProps.detail, temp: 0 } },

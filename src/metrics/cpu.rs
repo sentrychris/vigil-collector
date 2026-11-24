@@ -7,7 +7,7 @@ use crate::snapshot::Cpu;
 
 #[cfg(any(unix, windows))]
 use super::round1;
-use super::round2;
+use super::{round2, without_marks};
 
 /// Temperature sensors. On Unix this is sysinfo's ``Components`` (its
 /// ``component`` feature is enabled for Unix targets only). On Windows it
@@ -153,7 +153,49 @@ fn read_load_avg() -> Option<[f64; 3]> {
     None
 }
 
-pub fn collect(sys: &System, sensors: &Sensors, cores: u32) -> Cpu {
+/// The processor's model as people say it, from the brand string it
+/// reports: without the trademark signs, the generation, the word
+/// "processor", the core count, the graphics it comes with and the
+/// clock speed (which ``freq`` has, as it is now).
+/// "11th Gen Intel(R) Core(TM) i7-11700 @ 2.50GHz" is "Intel Core
+/// i7-11700", and "AMD Ryzen 7 5800X 8-Core Processor" is "AMD Ryzen 7
+/// 5800X".
+pub fn model(sys: &System) -> String {
+    sys.cpus()
+        .first()
+        .map_or_else(String::new, |c| tidy(c.brand()))
+}
+
+fn tidy(brand: &str) -> String {
+    let brand = without_marks(brand);
+    let brand = brand.split(" @ ").next().unwrap_or_default();
+    let brand = brand.split(" with ").next().unwrap_or_default();
+    let words: Vec<&str> = brand.split_whitespace().collect();
+    let ordinal = |word: &str| {
+        ["st", "nd", "rd", "th"].iter().any(|end| {
+            word.strip_suffix(end)
+                .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+        })
+    };
+    let mut kept: Vec<&str> = Vec::new();
+    let mut i = 0;
+    while i < words.len() {
+        let word = words[i];
+        if ordinal(word) && words.get(i + 1) == Some(&"Gen") {
+            i += 2;
+            continue;
+        }
+        let dropped = ["cpu", "processor", "apu"].contains(&word.to_lowercase().as_str())
+            || word.to_lowercase().ends_with("-core");
+        if !dropped {
+            kept.push(word);
+        }
+        i += 1;
+    }
+    kept.join(" ")
+}
+
+pub fn collect(sys: &System, sensors: &Sensors, cores: u32, name: &str) -> Cpu {
     let usage = if sys.cpus().is_empty() {
         0.0
     } else {
@@ -175,10 +217,46 @@ pub fn collect(sys: &System, sensors: &Sensors, cores: u32) -> Cpu {
     let load = read_load_avg();
 
     Cpu {
+        name: name.to_string(),
         usage,
         temp: read_cpu_temp(sensors),
         freq,
         cores,
         load,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::tidy;
+
+    #[test]
+    fn brand_strings_are_tidied_into_models() {
+        for (brand, model) in [
+            (
+                "11th Gen Intel(R) Core(TM) i7-11700 @ 2.50GHz",
+                "Intel Core i7-11700",
+            ),
+            (
+                "Intel(R) Core(TM) i5-8250U CPU @ 1.60GHz",
+                "Intel Core i5-8250U",
+            ),
+            ("Intel(R) Core(TM) Ultra 7 155H", "Intel Core Ultra 7 155H"),
+            (
+                "Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz",
+                "Intel Xeon Platinum 8370C",
+            ),
+            ("AMD Ryzen 7 5800X 8-Core Processor", "AMD Ryzen 7 5800X"),
+            (
+                "AMD Ryzen 5 5600G with Radeon Graphics",
+                "AMD Ryzen 5 5600G",
+            ),
+            ("AMD FX(tm)-8350 Eight-Core Processor", "AMD FX-8350"),
+            ("AMD EPYC 7763 64-Core Processor", "AMD EPYC 7763"),
+            ("Apple M2 Pro", "Apple M2 Pro"),
+            ("", ""),
+        ] {
+            assert_eq!(tidy(brand), model, "{brand}");
+        }
     }
 }

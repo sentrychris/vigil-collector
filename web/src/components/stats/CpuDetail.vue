@@ -16,6 +16,10 @@ defineProps<{
     <div class="metric-label">CPU LOAD</div>
   </div>
   <div class="metric-rows">
+    <div v-if="detail.name" class="metric-row">
+      <span class="row-label">MODEL</span>
+      <span class="row-value mono row-name" :title="detail.name">{{ detail.name }}</span>
+    </div>
     <div class="metric-row">
       <span class="row-label">FREQ</span>
       <span class="row-value mono">{{ detail.freq }} <span class="row-unit">MHz</span></span>
@@ -85,7 +89,15 @@ defineProps<{
   display: flex;
   justify-content: space-between;
   align-items: baseline;
+  gap: 0.75rem;
   font-size: var(--fs-caption);
+}
+/* A part's name: cut short rather than wrapped where the card is narrow. */
+.row-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .row-label { color: #6b7280; }
 .row-value {

@@ -168,6 +168,23 @@ library.add(
   faXmark,
 );
 
+// Vigil's own: Font Awesome Free has no graphics card. A card seen from
+// its fan side, with its bracket on the left and its connector below,
+// used as ``fa-solid fa-gpu-card``. The same outline is in
+// ui/icons.slint for the native windows.
+const faGpuCard = {
+  prefix: "fas",
+  iconName: "gpu-card",
+  icon: [
+    640,
+    512,
+    [],
+    "",
+    "M128 96L592 96A48 48 0 0 1 640 144L640 336A48 48 0 0 1 592 384L512 384L512 440L448 440L448 384L416 384L416 440L128 440L128 384A48 48 0 0 1 80 336L80 144A48 48 0 0 1 128 96ZM340 240A80 80 0 1 0 180 240A80 80 0 1 0 340 240ZM540 240A80 80 0 1 0 380 240A80 80 0 1 0 540 240ZM0 56A24 24 0 0 1 48 56L48 456A24 24 0 0 1 0 456Z",
+  ],
+} as unknown as IconDefinition;
+library.add(faGpuCard);
+
 // Regular (outline) — paired with their solid counterparts above.
 // Used by toggle UIs that need a filled/unfilled distinction.
 library.add(farBookmark as IconDefinition);

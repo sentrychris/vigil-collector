@@ -25,14 +25,18 @@ const byCpu = [
 ];
 const byMem = [...byCpu].sort((a, b) => b.mem - a.mem);
 
-function mounted() {
+function mounted(withGpu = false) {
   const pinia = createPinia();
   setActivePinia(pinia);
   const system = useSystemStore();
+  // A collector that can tell says how much of the graphics card each
+  // process uses; the others leave it out.
+  const told = (list: typeof byCpu) =>
+    withGpu ? list.map((p) => ({ ...p, gpu: p.name === "chrome.exe" ? 21.37 : 0 })) : list;
   system.staticUpdate({
     cpu: { usage: 8.21, freq: 3200, temp: 52, cores: 16 },
-    processes: byMem,
-    processes_by_cpu: byCpu,
+    processes: told(byMem),
+    processes_by_cpu: told(byCpu),
   } as unknown as SystemResponse);
   const wrapper = mount(CompactProcesses, {
     global: { plugins: [pinia], stubs: ["FontAwesomeIcon"] },
@@ -102,5 +106,27 @@ describe("CompactProcesses", () => {
     expect(cells[0]).toBe("node");
     expect(cells[2]).toBe("–%");
     expect(cells[3]).toBe("126MiB");
+  });
+
+  it("has a GPU column when the collector says who is using the card", () => {
+    const { wrapper, rows } = mounted(true);
+
+    expect(wrapper.findAll("thead th").map((th) => th.text())).toEqual([
+      "Name",
+      "",
+      "CPU",
+      "GPU",
+      "Memory",
+    ]);
+    // claude.exe, then chrome.exe: processor, graphics card, memory.
+    expect(rows()[0].slice(2)).toEqual(["12.7%", "0.0%", "3.07GiB"]);
+    expect(rows()[1].slice(2)).toEqual(["2.4%", "21.4%", "2.08GiB"]);
+  });
+
+  it("has no GPU column when it doesn't", () => {
+    const { wrapper, rows } = mounted();
+
+    expect(wrapper.findAll("thead th")).toHaveLength(4);
+    expect(rows()[0]).toHaveLength(4);
   });
 });

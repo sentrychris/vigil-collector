@@ -96,10 +96,12 @@ jobs:
           "$py" - <<'PY'
           import json
           system = json.load(open("system.json"))
-          for key in ["cpu", "mem", "disk", "disks", "disk_io", "network", "user",
+          for key in ["cpu", "gpu", "mem", "disk", "disks", "disk_io", "network", "user",
                       "platform", "processes", "processes_metric", "processes_by_cpu"]:
               assert key in system, f"/system missing {key}"
           assert system["mem"]["total"] > 0, "no memory reported"
+          assert "name" in system["cpu"], "no processor model field"
+          assert "type" in system["mem"] and "manufacturer" in system["mem"], "no memory module fields"
           assert system["disk"]["total"] > 0, "no primary disk reported"
           assert system["disks"], "no disks listed"
           assert system["processes"], "no processes listed"
@@ -108,7 +110,7 @@ jobs:
           assert network["interfaces"], "no network interfaces"
           worker = json.load(open("worker.json"))
           assert worker["id"] and worker["url"].startswith("ws://")
-          print(json.dumps({k: system[k] for k in ["cpu", "mem", "disk", "disk_io", "platform", "processes_metric"]}, indent=2))
+          print(json.dumps({k: system[k] for k in ["cpu", "gpu", "mem", "disk", "disk_io", "platform", "processes_metric"]}, indent=2))
           print("disks:", [(d["device"], d["mountpoint"]) for d in system["disks"]])
           print("top by cpu:", [p["name"] for p in system["processes_by_cpu"]])
           PY
