@@ -289,6 +289,24 @@ component Card inherits Rectangle {
     }
 }
 
+// ─── Disks ────────────────────────────────────────────────────────────
+// One card for each disk the machine has.
+
+export struct DiskRow {
+    // Which disk it is, "C: · Games", written after the card's title.
+    // Empty for the one card of a machine whose disks aren't listed.
+    name: string,
+    // How full it is, in percent, as a figure and as a share for the bar.
+    value: string,
+    share: float,
+    // Used of total, and what it is reading and writing where that is
+    // known: "400.1 / 475.1 GiB · 1.27 MB/s".
+    detail: string,
+    // The sparkline of its reads and writes (see Charts), or none below
+    // zero.
+    series: int,
+}
+
 // ─── Services ─────────────────────────────────────────────────────────
 // The service checks in one line while all is well. Any check that isn't
 // well is listed under it, and a press on the line lists them all.
@@ -947,9 +965,7 @@ export component CompactWindow inherits Window {
     in property <string> memory-detail;
     in property <float> memory-share;
 
-    in property <string> disk-value: "–";
-    in property <string> disk-detail;
-    in property <float> disk-share;
+    in property <[DiskRow]> disks;
 
     in property <string> network-down;
     in property <string> network-up;
@@ -1047,16 +1063,17 @@ export component CompactWindow inherits Window {
                 bar: root.memory-share;
                 series: 1;
             }
-            Card {
+            for disk in root.disks: Card {
                 title: "DISK";
+                name: disk.name;
                 glyph: Icons.hard-drive;
                 tone: Theme.green;
                 tint: #10b981;
-                value: root.disk-value;
+                value: disk.value;
                 unit: "%";
-                sub: root.disk-detail;
-                bar: root.disk-share;
-                series: 2;
+                sub: disk.detail;
+                bar: disk.share;
+                series: disk.series;
             }
             Card {
                 title: "NETWORK";

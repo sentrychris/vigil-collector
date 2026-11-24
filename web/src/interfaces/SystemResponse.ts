@@ -34,6 +34,9 @@ export interface RealtimeSystemResponse {
   gpu?: GpuInformation | null;
   mem: MemoryInformation;
   disk: UsageInformation;
+  /** Every disk, the primary one first. Left out by older collectors,
+   *  whose live readings have the primary disk only. */
+  disks?: DiskUsageInformation[];
   disk_io: DiskIoInformation;
   network: NetworkRateInformation;
   uptime?: string | null;

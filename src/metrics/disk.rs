@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::Path;
 use std::time::Instant;
 
@@ -158,13 +159,29 @@ pub fn collect_root(disks: &Disks) -> Disk {
     }
 }
 
+/// Every listed volume's counters as they stood at the last tick, by
+/// mount point, for the next tick to take its rates from.
+#[derive(Debug, Default)]
+pub struct VolumeIoPrev {
+    at: Option<Instant>,
+    counters: HashMap<String, IoCounters>,
+}
+
+/// Every disk worth listing, the primary one first, each with its own
+/// reads and writes since the last call.
 // Only Linux filters entries out; elsewhere every listed disk is kept.
 #[cfg_attr(not(target_os = "linux"), allow(clippy::unnecessary_filter_map))]
-pub fn collect_all(disks: &Disks) -> Vec<DiskInfo> {
+pub fn collect_all(disks: &Disks, prev: &mut VolumeIoPrev) -> Vec<DiskInfo> {
     #[cfg(target_os = "linux")]
     let nodev = nodev_filesystems();
+    #[cfg(target_os = "linux")]
+    let stats = diskstats();
 
-    disks
+    let now = Instant::now();
+    let elapsed = prev.at.map(|at| now.duration_since(at).as_secs_f64());
+    let mut counters = HashMap::new();
+
+    let mut list: Vec<DiskInfo> = disks
         .iter()
         .filter_map(|d| {
             let fstype = d.file_system().to_string_lossy().into_owned();
@@ -194,18 +211,48 @@ pub fn collect_all(disks: &Disks) -> Vec<DiskInfo> {
             #[cfg(not(any(target_os = "linux", windows)))]
             let device = d.name().to_string_lossy().into_owned();
 
+            #[cfg(windows)]
+            let label = d.name().to_string_lossy().trim().to_string();
+            #[cfg(not(windows))]
+            let label = String::new();
+
+            #[cfg(target_os = "linux")]
+            let read = stat_name(&device).and_then(|name| stats.get(&name).copied());
+            #[cfg(windows)]
+            let read = volume_io_counters(&mountpoint);
+            #[cfg(not(any(target_os = "linux", windows)))]
+            let read: Option<IoCounters> = None;
+
+            // Nothing to measure from on the first reading of a volume,
+            // which then says zero, as the machine's own total does.
+            let io = read.map(|now_c| match (prev.counters.get(&mountpoint), elapsed) {
+                (Some(last), Some(elapsed)) => rates(now_c, *last, elapsed),
+                _ => DiskIo::default(),
+            });
+            if let Some(now_c) = read {
+                counters.insert(mountpoint.clone(), now_c);
+            }
+
             let u = usage_for(d);
             Some(DiskInfo {
                 device,
                 mountpoint,
+                label,
                 fstype,
                 total: bytes_to_gib(u.total),
                 used: bytes_to_gib(u.used),
                 free: bytes_to_gib(u.free),
                 percent: u.percent,
+                io,
             })
         })
-        .collect()
+        .collect();
+
+    prev.at = Some(now);
+    prev.counters = counters;
+    // The one reported as ``disk`` leads; the rest stay as listed.
+    list.sort_by_key(|d| !is_primary_mount(Path::new(&d.mountpoint)));
+    list
 }
 
 #[cfg(target_os = "linux")]
@@ -231,12 +278,39 @@ fn nodev_filesystems() -> std::collections::HashSet<String> {
 }
 
 /// Cumulative disk counters since boot, summed over whole disks.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 struct IoCounters {
     read_bytes: u64,
     write_bytes: u64,
     read_ops: u64,
     write_ops: u64,
+}
+
+impl IoCounters {
+    // No counters to add up on macOS.
+    #[cfg_attr(not(any(target_os = "linux", windows)), allow(dead_code))]
+    fn add(&mut self, other: &IoCounters) {
+        self.read_bytes = self.read_bytes.saturating_add(other.read_bytes);
+        self.write_bytes = self.write_bytes.saturating_add(other.write_bytes);
+        self.read_ops = self.read_ops.saturating_add(other.read_ops);
+        self.write_ops = self.write_ops.saturating_add(other.write_ops);
+    }
+}
+
+/// What was read and written between two readings of the same counters,
+/// ``elapsed`` seconds apart, per second. Counters that went backwards
+/// (a volume taken away and put back) count as nothing.
+fn rates(now: IoCounters, last: IoCounters, elapsed: f64) -> DiskIo {
+    if elapsed <= 0.0 {
+        return DiskIo::default();
+    }
+    let rate = |cur: u64, old: u64| (cur.saturating_sub(old) as f64 / elapsed).round() as u64;
+    DiskIo {
+        read_bytes_per_sec: rate(now.read_bytes, last.read_bytes),
+        write_bytes_per_sec: rate(now.write_bytes, last.write_bytes),
+        read_iops: rate(now.read_ops, last.read_ops),
+        write_iops: rate(now.write_ops, last.write_ops),
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -267,20 +341,23 @@ fn whole_disks() -> std::collections::HashSet<String> {
     set
 }
 
+/// ``/proc/diskstats``: the counters of every block device, whole disks
+/// and their partitions alike, by the kernel's name for each ("sda",
+/// "sda1", "nvme0n1p2", "dm-0").
 #[cfg(target_os = "linux")]
-fn read_io_counters() -> Option<IoCounters> {
-    let raw = std::fs::read_to_string("/proc/diskstats").ok()?;
-    let allowed = whole_disks();
-    let mut c = IoCounters::default();
-    let mut read_sectors = 0u64;
-    let mut write_sectors = 0u64;
+fn diskstats() -> HashMap<String, IoCounters> {
+    let Ok(raw) = std::fs::read_to_string("/proc/diskstats") else {
+        return HashMap::new();
+    };
+    parse_diskstats(&raw)
+}
 
+#[cfg(any(target_os = "linux", test))]
+fn parse_diskstats(raw: &str) -> HashMap<String, IoCounters> {
+    let mut all = HashMap::new();
     for line in raw.lines() {
         let f: Vec<&str> = line.split_whitespace().collect();
         if f.len() < 14 {
-            continue;
-        }
-        if !allowed.contains(f[2]) {
             continue;
         }
         // /proc/diskstats column order (0-indexed, after the leading
@@ -288,27 +365,52 @@ fn read_io_counters() -> Option<IoCounters> {
         //   3: reads completed   5: sectors read
         //   7: writes completed  9: sectors written
         let num = |i: usize| f[i].parse::<u64>().unwrap_or(0);
-        c.read_ops = c.read_ops.saturating_add(num(3));
-        read_sectors = read_sectors.saturating_add(num(5));
-        c.write_ops = c.write_ops.saturating_add(num(7));
-        write_sectors = write_sectors.saturating_add(num(9));
+        all.insert(
+            f[2].to_string(),
+            IoCounters {
+                read_ops: num(3),
+                write_ops: num(7),
+                // Sectors here are 512 bytes whatever the device's own
+                // sector size — see Documentation/iostats.rst.
+                read_bytes: num(5).saturating_mul(512),
+                write_bytes: num(9).saturating_mul(512),
+            },
+        );
     }
+    all
+}
 
-    // /proc/diskstats reports sectors in 512-byte units regardless of the
-    // device's actual sector size — see Documentation/iostats.rst.
-    c.read_bytes = read_sectors.saturating_mul(512);
-    c.write_bytes = write_sectors.saturating_mul(512);
+/// The kernel's name for a mounted device, which is what its row in
+/// ``/proc/diskstats`` goes by: ``/dev/sda1`` is "sda1", and a name that
+/// is only a link (``/dev/mapper/vg-root``, ``/dev/disk/by-uuid/…``) is
+/// whatever it points to ("dm-0").
+#[cfg(target_os = "linux")]
+fn stat_name(device: &str) -> Option<String> {
+    let real = std::fs::canonicalize(device).ok()?;
+    Some(real.file_name()?.to_string_lossy().into_owned())
+}
+
+#[cfg(target_os = "linux")]
+fn read_io_counters() -> Option<IoCounters> {
+    let stats = diskstats();
+    if stats.is_empty() {
+        return None;
+    }
+    let allowed = whole_disks();
+    let mut c = IoCounters::default();
+    for (_, one) in stats.iter().filter(|(name, _)| allowed.contains(*name)) {
+        c.add(one);
+    }
     Some(c)
 }
 
-/// Sum ``IOCTL_DISK_PERFORMANCE`` over every ``\\.\PhysicalDriveN``, the
-/// same source psutil's ``disk_io_counters`` uses. Querying physical
-/// drives rather than volumes avoids double-counting a disk with several
-/// partitions, the Windows analogue of the whole-disk filter on Linux.
-/// Opening a drive with zero access rights is enough for this IOCTL, so
-/// it works without admin.
+/// ``IOCTL_DISK_PERFORMANCE`` on one device: a physical drive
+/// (``\\.\PhysicalDrive0``) or a volume (``\\.\C:``). The counters run
+/// from when the machine started, whoever asks. Opening the device with
+/// zero access rights is enough for this IOCTL, so it works without
+/// admin.
 #[cfg(windows)]
-fn read_io_counters() -> Option<IoCounters> {
+fn disk_performance(device: &str) -> Option<IoCounters> {
     use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::Storage::FileSystem::{
         CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
@@ -316,6 +418,58 @@ fn read_io_counters() -> Option<IoCounters> {
     use windows_sys::Win32::System::IO::DeviceIoControl;
     use windows_sys::Win32::System::Ioctl::{DISK_PERFORMANCE, IOCTL_DISK_PERFORMANCE};
 
+    let path: Vec<u16> = device.encode_utf16().chain([0]).collect();
+    // SAFETY: ``path`` is NUL-terminated and outlives the call; the
+    // handle is closed below on every path that opened it.
+    let handle = unsafe {
+        CreateFileW(
+            path.as_ptr(),
+            0,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            std::ptr::null(),
+            OPEN_EXISTING,
+            0,
+            std::ptr::null_mut(),
+        )
+    };
+    if handle == INVALID_HANDLE_VALUE {
+        return None;
+    }
+    // SAFETY: DISK_PERFORMANCE is plain-old-data; the output buffer
+    // and its size describe the same local.
+    let mut perf: DISK_PERFORMANCE = unsafe { std::mem::zeroed() };
+    let mut returned = 0u32;
+    let ok = unsafe {
+        DeviceIoControl(
+            handle,
+            IOCTL_DISK_PERFORMANCE,
+            std::ptr::null(),
+            0,
+            (&mut perf as *mut DISK_PERFORMANCE).cast(),
+            std::mem::size_of::<DISK_PERFORMANCE>() as u32,
+            &mut returned,
+            std::ptr::null_mut(),
+        )
+    };
+    // SAFETY: ``handle`` came from a successful CreateFileW above.
+    unsafe { CloseHandle(handle) };
+    if ok == 0 {
+        return None;
+    }
+    Some(IoCounters {
+        read_bytes: perf.BytesRead.max(0) as u64,
+        write_bytes: perf.BytesWritten.max(0) as u64,
+        read_ops: u64::from(perf.ReadCount),
+        write_ops: u64::from(perf.WriteCount),
+    })
+}
+
+/// Sum the counters of every ``\\.\PhysicalDriveN``, the same source
+/// psutil's ``disk_io_counters`` uses. Querying physical drives rather
+/// than volumes avoids double-counting a disk with several partitions,
+/// the Windows analogue of the whole-disk filter on Linux.
+#[cfg(windows)]
+fn read_io_counters() -> Option<IoCounters> {
     // psutil's upper bound. Drive numbers can have gaps (an unplugged USB
     // disk keeps its slot until reboot), so probe the whole range; a
     // missing drive fails ``CreateFileW`` immediately.
@@ -324,56 +478,32 @@ fn read_io_counters() -> Option<IoCounters> {
     let mut c = IoCounters::default();
     let mut any = false;
     for n in 0..MAX_PHYSICAL_DRIVES {
-        let path: Vec<u16> = format!(r"\\.\PhysicalDrive{n}")
-            .encode_utf16()
-            .chain([0])
-            .collect();
-        // SAFETY: ``path`` is NUL-terminated and outlives the call; the
-        // handle is closed below on every path that opened it.
-        let handle = unsafe {
-            CreateFileW(
-                path.as_ptr(),
-                0,
-                FILE_SHARE_READ | FILE_SHARE_WRITE,
-                std::ptr::null(),
-                OPEN_EXISTING,
-                0,
-                std::ptr::null_mut(),
-            )
-        };
-        if handle == INVALID_HANDLE_VALUE {
-            continue;
+        if let Some(one) = disk_performance(&format!(r"\\.\PhysicalDrive{n}")) {
+            any = true;
+            c.add(&one);
         }
-        // SAFETY: DISK_PERFORMANCE is plain-old-data; the output buffer
-        // and its size describe the same local.
-        let mut perf: DISK_PERFORMANCE = unsafe { std::mem::zeroed() };
-        let mut returned = 0u32;
-        let ok = unsafe {
-            DeviceIoControl(
-                handle,
-                IOCTL_DISK_PERFORMANCE,
-                std::ptr::null(),
-                0,
-                (&mut perf as *mut DISK_PERFORMANCE).cast(),
-                std::mem::size_of::<DISK_PERFORMANCE>() as u32,
-                &mut returned,
-                std::ptr::null_mut(),
-            )
-        };
-        // SAFETY: ``handle`` came from a successful CreateFileW above.
-        unsafe { CloseHandle(handle) };
-        if ok == 0 {
-            continue;
-        }
-        any = true;
-        c.read_bytes = c.read_bytes.saturating_add(perf.BytesRead.max(0) as u64);
-        c.write_bytes = c
-            .write_bytes
-            .saturating_add(perf.BytesWritten.max(0) as u64);
-        c.read_ops = c.read_ops.saturating_add(u64::from(perf.ReadCount));
-        c.write_ops = c.write_ops.saturating_add(u64::from(perf.WriteCount));
     }
     any.then_some(c)
+}
+
+/// The counters of the volume mounted at a drive root (``C:\``), which
+/// is how Windows mounts everything sysinfo lists.
+#[cfg(windows)]
+fn volume_io_counters(mountpoint: &str) -> Option<IoCounters> {
+    disk_performance(&volume_device(mountpoint)?)
+}
+
+/// ``C:\`` as the device to open for it, ``\\.\C:``.
+#[cfg(any(windows, test))]
+fn volume_device(mountpoint: &str) -> Option<String> {
+    let drive = mountpoint.strip_suffix('\\').unwrap_or(mountpoint);
+    let mut chars = drive.chars();
+    match (chars.next(), chars.next(), chars.next()) {
+        (Some(letter), Some(':'), None) if letter.is_ascii_alphabetic() => {
+            Some(format!(r"\\.\{letter}:"))
+        }
+        _ => None,
+    }
 }
 
 #[cfg(not(any(target_os = "linux", windows)))]
@@ -392,23 +522,16 @@ pub fn collect_io(prev: &mut Option<DiskIoPrev>) -> DiskIo {
     }) else {
         return DiskIo::default();
     };
-    let elapsed = now.duration_since(last.at).as_secs_f64();
-    if elapsed <= 0.0 {
-        return DiskIo::default();
-    }
-    let rate = |cur: u64, old: u64| (cur.saturating_sub(old) as f64 / elapsed).round() as u64;
-    let l = last.counters;
-    DiskIo {
-        read_bytes_per_sec: rate(now_c.read_bytes, l.read_bytes),
-        write_bytes_per_sec: rate(now_c.write_bytes, l.write_bytes),
-        read_iops: rate(now_c.read_ops, l.read_ops),
-        write_iops: rate(now_c.write_ops, l.write_ops),
-    }
+    rates(
+        now_c,
+        last.counters,
+        now.duration_since(last.at).as_secs_f64(),
+    )
 }
 
 #[cfg(test)]
 mod tests {
-    use super::Usage;
+    use super::{IoCounters, Usage, parse_diskstats, rates, volume_device};
 
     #[test]
     fn percent_uses_df_denominator() {
@@ -437,5 +560,91 @@ mod tests {
             assert!(super::is_primary_mount(std::path::Path::new("/")));
             assert!(!super::is_primary_mount(std::path::Path::new("/home")));
         }
+    }
+
+    #[test]
+    fn diskstats_are_read_by_device_name() {
+        let raw = "\
+   8       0 sda 1000 0 80000 0 500 0 40000 0 0 0 0 0 0 0 0 0 0
+   8       1 sda1 900 0 64000 0 400 0 32000 0 0 0 0 0 0 0 0 0 0
+ 253       0 dm-0 10 0 16 0 20 0 8 0 0 0 0 0 0 0 0 0 0
+ too short
+";
+        let stats = parse_diskstats(raw);
+        assert_eq!(stats.len(), 3);
+        // Sectors are 512 bytes each.
+        assert_eq!(
+            stats["sda1"],
+            IoCounters {
+                read_bytes: 64000 * 512,
+                write_bytes: 32000 * 512,
+                read_ops: 900,
+                write_ops: 400,
+            }
+        );
+        assert_eq!(stats["dm-0"].write_bytes, 8 * 512);
+    }
+
+    #[test]
+    fn rates_are_per_second_and_never_negative() {
+        let counters = |bytes: u64, ops: u64| IoCounters {
+            read_bytes: bytes,
+            write_bytes: bytes * 2,
+            read_ops: ops,
+            write_ops: ops * 2,
+        };
+        let io = rates(counters(3000, 30), counters(1000, 10), 2.0);
+        assert_eq!(
+            (io.read_bytes_per_sec, io.write_bytes_per_sec),
+            (1000, 2000)
+        );
+        assert_eq!((io.read_iops, io.write_iops), (10, 20));
+        // Counters that start again from nothing, and no time passing.
+        let io = rates(counters(10, 1), counters(1000, 10), 1.0);
+        assert_eq!((io.read_bytes_per_sec, io.write_iops), (0, 0));
+        assert_eq!(
+            rates(counters(3000, 30), counters(1000, 10), 0.0).read_bytes_per_sec,
+            0
+        );
+    }
+
+    #[test]
+    fn a_drive_root_names_its_volume() {
+        assert_eq!(volume_device("C:\\").as_deref(), Some(r"\\.\C:"));
+        assert_eq!(volume_device("d:").as_deref(), Some(r"\\.\d:"));
+        // A volume mounted in a folder has no letter to open it by.
+        assert_eq!(volume_device("C:\\Mounts\\Data\\"), None);
+        assert_eq!(volume_device("/"), None);
+        assert_eq!(volume_device(""), None);
+    }
+
+    /// The counters must keep running between one look and the next, as
+    /// each look opens the volume afresh: what is written in between has
+    /// to show in them.
+    #[cfg(windows)]
+    #[test]
+    fn a_volumes_counters_count_what_is_written_to_it() {
+        use std::io::Write;
+
+        const WRITTEN: u64 = 8 * 1024 * 1024;
+        let folder = std::env::temp_dir();
+        let drive: String = folder.to_string_lossy().chars().take(2).collect();
+        let before = super::volume_io_counters(&drive).expect("the volume's counters can be read");
+
+        let path = folder.join(format!("vigil-volume-io-{}.tmp", std::process::id()));
+        let mut file = std::fs::File::create(&path).unwrap();
+        file.write_all(&vec![0x5a; WRITTEN as usize]).unwrap();
+        file.sync_all().unwrap();
+        drop(file);
+        let after = super::volume_io_counters(&drive);
+        let _ = std::fs::remove_file(&path);
+
+        let after = after.expect("the volume's counters can be read again");
+        let grew = after.write_bytes.saturating_sub(before.write_bytes);
+        assert!(
+            grew >= WRITTEN / 2,
+            "wrote {WRITTEN} bytes to {drive} and its counters grew by {grew}"
+        );
+        assert!(after.write_ops > before.write_ops);
     }
 }

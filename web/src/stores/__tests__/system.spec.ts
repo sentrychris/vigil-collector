@@ -70,6 +70,32 @@ describe("System Store", () => {
     expect(system.history.gpu).toEqual([40, 55, 0]);
   });
 
+  it("keeps each disk's reads and writes while it is listed", () => {
+    const system = useSystemStore();
+    const disk = (mountpoint: string, read: number) => ({
+      device: mountpoint,
+      mountpoint,
+      fstype: "NTFS",
+      total: 475,
+      used: 318,
+      free: 157,
+      percent: 66.9,
+      io: { read_bytes_per_sec: read, write_bytes_per_sec: 24, read_iops: 1, write_iops: 1 },
+    });
+
+    system.liveUpdate({ ...reading(8), disks: [disk("C:\\", 1000), disk("D:\\", 0)] });
+    system.liveUpdate({ ...reading(9), disks: [disk("C:\\", 2000), disk("D:\\", 0)] });
+    expect(system.history.disks).toEqual({ "C:\\": [1024, 2024], "D:\\": [24, 24] });
+    expect(system.realtime.disks).toHaveLength(2);
+
+    // D: is unplugged, then an older collector's reading lists none.
+    system.liveUpdate({ ...reading(9), disks: [disk("C:\\", 0)] });
+    expect(system.history.disks).toEqual({ "C:\\": [1024, 2024, 24] });
+    system.liveUpdate(reading(9));
+    expect(system.history.disks).toEqual({});
+    expect(system.realtime.disks).toEqual([]);
+  });
+
   it("takes a reading from an older collector, without the list by CPU", () => {
     const system = useSystemStore();
 

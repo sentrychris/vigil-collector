@@ -38,7 +38,13 @@ export interface GpuInformation {
 export interface DiskUsageInformation extends UsageInformation {
   device: string;
   mountpoint: string;
+  /** The name its owner gave the volume, e.g. "Games". Windows only;
+   *  empty elsewhere, and left out by older collectors. */
+  label?: string;
   fstype: string;
+  /** Reads and writes of this volume alone. Left out where its counters
+   *  can't be read, and by older collectors. */
+  io?: DiskIoInformation;
 }
 
 export interface NetworkRateInformation {

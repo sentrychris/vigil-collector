@@ -63,7 +63,7 @@ between ~11 ms/tick and ~3 ms/tick at idle:
 
 | Cadence | What runs | Why |
 |---|---|---|
-| Every tick (1 s) | CPU usage, memory, networks (incl. new/removed interfaces), temperature sensors, disk I/O delta, per-mount usage | Counter deltas need a fixed window; statvfs / `GetDiskFreeSpaceExW` is ~30 µs |
+| Every tick (1 s) | CPU usage, memory, networks (incl. new/removed interfaces), temperature sensors, disk I/O delta (machine and per partition), per-mount usage | Counter deltas need a fixed window; statvfs / `GetDiskFreeSpaceExW` is ~30 µs |
 | Every 5 ticks (`PROCESS_SCAN_EVERY`) | Full process scan, CPU frequency, user list | Top-N rankings stable second-to-second; frequency is a display value |
 | Every 60 ticks (`DISK_LIST_REFRESH_EVERY`) | Mount / drive list re-scan | Mounts change rarely; per-mount usage is read separately every tick |
 
@@ -238,7 +238,18 @@ Three independent collectors:
   marked `nodev` (proc, sysfs, tmpfs, overlay, fuse.snapfuse, ...). On
   Windows sysinfo already lists only fixed and removable drives; `device`
   is the drive root (`C:\`), as psutil reports it, because sysinfo's
-  `name()` there is the volume label.
+  `name()` there is the volume label, which is sent as `label`. The
+  primary partition is put first.
+- Each listed partition also gets its own reads and writes (`io`), as a
+  delta of that partition's counters between ticks
+  ([`VolumeIoPrev`](../src/metrics/disk.rs) holds the last ones). On
+  Linux they are the partition's own row of `/proc/diskstats`, found by
+  following the mounted device to the kernel's name for it
+  (`/dev/mapper/vg-root` is `dm-0`). On Windows they come from
+  `IOCTL_DISK_PERFORMANCE` on the volume (`\\.\C:`), opened afresh each
+  tick with no access rights, so nothing is held open that would get in
+  the way of ejecting a drive. A volume mounted in a folder rather than
+  at a drive letter has no `io`, nor does anything on macOS.
 - Usage per mount: `statvfs` on Unix (`df` arithmetic: reserved blocks
   count as used), `GetDiskFreeSpaceExW` on Windows (`used = total -
   total_free`, `free = available to caller`). `percent` is `used / (used +
@@ -341,7 +352,7 @@ inherent methods:
 
 - [`http_view()`](../src/snapshot.rs) → `/system` payload.
 - [`ws_view()`](../src/snapshot.rs) → WebSocket frame. Differs
-  from the HTTP view: no `disks`, no `user`, no `platform`; `uptime` is
+  from the HTTP view: no `user`, no `platform`; `uptime` is
   top-level instead of nested.
 - [`network_view()`](../src/snapshot.rs) → `/network` payload.
 

@@ -11,7 +11,7 @@ use tokio::task::JoinHandle;
 
 use crate::metrics;
 use crate::metrics::cpu::Sensors;
-use crate::metrics::disk::DiskIoPrev;
+use crate::metrics::disk::{DiskIoPrev, VolumeIoPrev};
 use crate::metrics::net::NetIoPrev;
 use crate::snapshot::{Process, ProcessCpu, Snapshot};
 
@@ -41,6 +41,8 @@ struct SamplerState {
     cpu_name: String,
     modules: metrics::smbios::Modules,
     disk_io_prev: Option<DiskIoPrev>,
+    /// The same for each listed volume's own counters.
+    volume_io_prev: VolumeIoPrev,
     net_io_prev: Option<NetIoPrev>,
     tick: u64,
     cached_processes: Vec<Process>,
@@ -76,6 +78,7 @@ impl SamplerState {
             cpu_name,
             modules: metrics::smbios::modules(),
             disk_io_prev: None,
+            volume_io_prev: VolumeIoPrev::default(),
             net_io_prev: None,
             tick: 0,
             cached_processes: Vec::new(),
@@ -136,8 +139,9 @@ impl SamplerState {
         // mounts/unmounts. Per-disk usage is read per-tick by
         // ``metrics::disk`` itself (statvfs / GetDiskFreeSpaceExW), so
         // sysinfo's stored usage is only a fallback and its storage read
-        // rides along with the re-scan. Kind (SSD/HDD) and per-volume I/O
-        // aren't used and are skipped.
+        // rides along with the re-scan. Kind (SSD/HDD) isn't used, and
+        // per-volume I/O is read by ``metrics::disk`` too; both are
+        // skipped.
         if self.tick.is_multiple_of(DISK_LIST_REFRESH_EVERY) {
             self.disks
                 .refresh_specifics(true, DiskRefreshKind::nothing().with_storage());
@@ -149,7 +153,7 @@ impl SamplerState {
         let gpu = self.gpu.read();
         let mem = metrics::mem::collect(&self.sys, &self.modules);
         let disk_root = metrics::disk::collect_root(&self.disks);
-        let all_disks = metrics::disk::collect_all(&self.disks);
+        let all_disks = metrics::disk::collect_all(&self.disks, &mut self.volume_io_prev);
         let disk_io = metrics::disk::collect_io(&mut self.disk_io_prev);
         let hidden = metrics::net::hidden_interfaces();
         let net = metrics::net::collect_throughput(&self.networks, &hidden, &mut self.net_io_prev);

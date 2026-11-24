@@ -14,7 +14,7 @@ use crate::native::surface::{self, Frame, Surface};
 use crate::native::ui::{Charts, CompactWindow, Theme};
 use crate::native::{self, save_preview};
 use crate::server::probes::ProbeResult;
-use crate::snapshot::{Gpu, GpuMemory, Process, ProcessCpu, Snapshot};
+use crate::snapshot::{DiskInfo, DiskIo, Gpu, GpuMemory, Process, ProcessCpu, Snapshot};
 
 const PAGE_DARK: [u8; 3] = [0x0a, 0x0e, 0x17];
 
@@ -89,6 +89,18 @@ pub(super) fn without_a_graphics_card(second: u32) -> Snapshot {
         120_000
     };
     s.disk_io.write_bytes_per_sec = 310_000;
+    // Its one disk, as the collector lists it.
+    s.disks = vec![DiskInfo {
+        device: "C:\\".into(),
+        mountpoint: "C:\\".into(),
+        label: "Windows".into(),
+        fstype: "NTFS".into(),
+        total: s.disk.total,
+        used: s.disk.used,
+        free: s.disk.free,
+        percent: s.disk.percent,
+        io: Some(s.disk_io.clone()),
+    }];
     s.network.rx_bytes_per_sec = 180_000 + u64::from(second % 7) * 260_000;
     s.network.tx_bytes_per_sec = 42_000 + u64::from(second % 5) * 90_000;
     let names = [
@@ -126,6 +138,52 @@ pub(super) fn without_a_graphics_card(second: u32) -> Snapshot {
             gpu: None,
         })
         .collect();
+    s
+}
+
+/// The first machine with two more disks: a big one for games, nearly
+/// full and busy now and then, and a backup disk that mostly sleeps.
+pub(super) fn with_more_disks(second: u32) -> Snapshot {
+    let mut s = snapshot(second);
+    let disk = |mountpoint: &str, label: &str, total: f64, percent: f64, read: u64, write: u64| {
+        let used = total * percent / 100.0;
+        DiskInfo {
+            device: mountpoint.into(),
+            mountpoint: mountpoint.into(),
+            label: label.into(),
+            fstype: "NTFS".into(),
+            total,
+            used,
+            free: total - used,
+            percent,
+            io: Some(DiskIo {
+                read_bytes_per_sec: read,
+                write_bytes_per_sec: write,
+                ..DiskIo::default()
+            }),
+        }
+    };
+    let loading = if (second % 30) < 8 { 46_000_000 } else { 0 };
+    s.disks.push(disk(
+        "D:\\",
+        "Games",
+        1863.0,
+        84.2,
+        loading + u64::from(second % 4) * 900_000,
+        24_000,
+    ));
+    s.disks.push(disk(
+        "E:\\",
+        "Backup",
+        3726.0,
+        12.0,
+        0,
+        if second.is_multiple_of(17) {
+            2_100_000
+        } else {
+            0
+        },
+    ));
     s
 }
 
@@ -244,7 +302,11 @@ const MEMORY_BAR_Y: f32 = 33.0 + 8.0 + 46.0 + 6.0 + 46.0 + 6.0 + 45.5;
 /// How much further down everything is with the graphics card's card
 /// above it.
 const GPU_CARD: f32 = 46.0 + 6.0;
+/// And with one more disk's card above it; a disk's bar is this far
+/// under the memory card's.
+const DISK_CARD: f32 = 55.0 + 6.0;
 const AMBER: [u8; 3] = [0xfb, 0xbf, 0x24];
+const GREEN: [u8; 3] = [0x34, 0xd3, 0x99];
 
 #[test]
 fn draws_the_dashboard_at_its_usual_size() {
@@ -292,6 +354,41 @@ fn a_graphics_card_that_turns_up_gets_its_card_then() {
     shown.read(61);
     shown.paint();
     assert!(apart(shown.at(40.0, MEMORY_BAR_Y + GPU_CARD), AMBER) < 40);
+}
+
+#[test]
+fn every_disk_has_a_card_of_its_own() {
+    let shown = Shown::of(with_more_disks, 420, 754, 1.0, true);
+    shown.save("compact-disks-dark");
+    // Three green bars under memory's amber one, each as long as its disk
+    // is full: 55%, 84% and 12%.
+    let first = MEMORY_BAR_Y + GPU_CARD + DISK_CARD;
+    assert!(apart(shown.at(40.0, first - DISK_CARD), AMBER) < 40);
+    for (card, full_at, empty_at) in [(0.0, 200.0, 260.0), (1.0, 320.0, 380.0), (2.0, 40.0, 80.0)] {
+        let y = first + card * DISK_CARD;
+        assert!(apart(shown.at(full_at, y), GREEN) < 40, "card {card}");
+        assert!(apart(shown.at(empty_at, y), GREEN) > 100, "card {card}");
+    }
+    // And no fourth.
+    assert!(apart(shown.at(40.0, first + 3.0 * DISK_CARD), GREEN) > 100);
+
+    Shown::of(with_more_disks, 420, 754, 1.0, false).save("compact-disks-light");
+}
+
+#[test]
+fn a_disk_that_is_plugged_in_gets_its_card_then() {
+    let mut shown = Shown::new(420, 754, 1.0, true);
+    let second_card = MEMORY_BAR_Y + GPU_CARD + 2.0 * DISK_CARD;
+    assert!(apart(shown.at(320.0, second_card), GREEN) > 100);
+    shown.readings = with_more_disks;
+    shown.read(61);
+    shown.paint();
+    assert!(apart(shown.at(320.0, second_card), GREEN) < 40);
+    // And loses it when it is taken away again.
+    shown.readings = snapshot;
+    shown.read(62);
+    shown.paint();
+    assert!(apart(shown.at(320.0, second_card), GREEN) > 100);
 }
 
 #[test]
