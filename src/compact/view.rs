@@ -227,9 +227,12 @@ pub fn show(ui: &CompactWindow, snapshot: &Snapshot) {
         snapshot.processes.iter().any(|p| p.gpu.is_some())
             || snapshot.processes_by_cpu.iter().any(|p| p.gpu.is_some()),
     );
-    let (by_cpu, by_memory) = process_rows(snapshot);
+    let (by_cpu, by_gpu, by_memory) = process_rows(snapshot);
     if let Some(rows) = changed(&ui.get_processes_by_cpu(), by_cpu) {
         ui.set_processes_by_cpu(rows);
+    }
+    if let Some(rows) = changed(&ui.get_processes_by_gpu(), by_gpu) {
+        ui.set_processes_by_gpu(rows);
     }
     if let Some(rows) = changed(&ui.get_processes_by_memory(), by_memory) {
         ui.set_processes_by_memory(rows);
@@ -318,10 +321,12 @@ fn overall(rows: &[ServiceRow]) -> (i32, String) {
     }
 }
 
-/// The two lists the collector sends, the ten busiest by each measure,
-/// as rows. A process's CPU arrives as a share of one core and is shown
-/// as a share of the whole machine, the scale the CPU card uses.
-fn process_rows(snapshot: &Snapshot) -> (Vec<ProcessRow>, Vec<ProcessRow>) {
+/// The lists the collector sends, the ten busiest by each measure, as
+/// rows: by processor, by graphics card (empty where the collector
+/// can't tell that apart by process) and by memory. A process's CPU
+/// arrives as a share of one core and is shown as a share of the whole
+/// machine, the scale the CPU card uses.
+fn process_rows(snapshot: &Snapshot) -> (Vec<ProcessRow>, Vec<ProcessRow>, Vec<ProcessRow>) {
     let cores = f64::from(snapshot.cpu.cores.max(1));
     let row = |name: &str, cpu: f64, gpu: Option<f64>, mem: f64, amount: f64, most: f64| {
         let (mem, mem_unit) = process_memory(mem);
@@ -346,6 +351,20 @@ fn process_rows(snapshot: &Snapshot) -> (Vec<ProcessRow>, Vec<ProcessRow>) {
         .iter()
         .map(|p| row(&p.name, p.cpu, p.gpu, p.mem, p.cpu / cores, most_cpu))
         .collect();
+    // Against a whole percent at least, so a card nobody is using
+    // doesn't fill every bar.
+    let most_gpu = snapshot
+        .processes_by_gpu
+        .iter()
+        .fold(1.0_f64, |most, p| most.max(p.gpu.unwrap_or(0.0)));
+    let by_gpu = snapshot
+        .processes_by_gpu
+        .iter()
+        .map(|p| {
+            let amount = p.gpu.unwrap_or(0.0);
+            row(&p.name, p.cpu, p.gpu, p.mem, amount, most_gpu)
+        })
+        .collect();
     let most_memory = snapshot
         .processes
         .iter()
@@ -355,7 +374,7 @@ fn process_rows(snapshot: &Snapshot) -> (Vec<ProcessRow>, Vec<ProcessRow>) {
         .iter()
         .map(|p| row(&p.name, p.cpu, p.gpu, p.mem, p.mem, most_memory))
         .collect();
-    (by_cpu, by_memory)
+    (by_cpu, by_gpu, by_memory)
 }
 
 /// A process's memory, which arrives in MiB: whole MiB below a GiB, and
@@ -646,9 +665,30 @@ mod tests {
         snapshot
     }
 
+    /// The same machine with a list by graphics card too.
+    fn snapshot_with_a_list_by_gpu() -> Snapshot {
+        let mut snapshot = snapshot();
+        let process = |name: &str, cpu: f64, gpu: f64| Process {
+            pid: 1,
+            name: name.into(),
+            username: "chris".into(),
+            mem: 455.0,
+            cpu,
+            gpu: Some(gpu),
+        };
+        snapshot.processes_by_gpu = vec![
+            process("game", 40.0, 82.5),
+            process("chrome", 200.0, 41.26),
+            process("idle", 0.0, 0.0),
+        ];
+        snapshot
+    }
+
     #[test]
     fn process_cpu_is_a_share_of_the_whole_machine() {
-        let (by_cpu, by_memory) = process_rows(&snapshot());
+        let (by_cpu, by_gpu, by_memory) = process_rows(&snapshot());
+        // No list by graphics card from a collector that can't tell.
+        assert!(by_gpu.is_empty());
         // Two of four cores flat out is half the machine.
         assert_eq!(by_cpu[0].cpu, "50.0");
         assert_eq!(by_cpu[0].name, "CHROME");
@@ -661,6 +701,33 @@ mod tests {
         assert_eq!(by_cpu[0].gpu, "41.3");
         assert_eq!(by_cpu[1].gpu, "");
         assert_eq!(by_memory[0].gpu, "41.3");
+    }
+
+    #[test]
+    fn the_list_by_gpu_is_drawn_against_its_busiest() {
+        let (_, by_gpu, _) = process_rows(&snapshot_with_a_list_by_gpu());
+        let shown: Vec<_> = by_gpu
+            .iter()
+            .map(|row| (row.name.as_str(), row.gpu.as_str(), row.share))
+            .collect();
+        assert_eq!(
+            shown,
+            [
+                ("GAME", "82.5", 100.0),
+                ("CHROME", "41.3", (41.26_f64 / 82.5 * 100.0) as f32),
+                ("IDLE", "0.0", 2.0),
+            ]
+        );
+    }
+
+    #[test]
+    fn an_idle_card_fills_no_bars() {
+        let mut snapshot = snapshot_with_a_list_by_gpu();
+        for process in &mut snapshot.processes_by_gpu {
+            process.gpu = Some(0.2);
+        }
+        let (_, by_gpu, _) = process_rows(&snapshot);
+        assert!(by_gpu.iter().all(|row| row.share == 20.0));
     }
 
     #[test]

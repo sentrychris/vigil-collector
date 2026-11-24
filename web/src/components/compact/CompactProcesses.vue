@@ -1,27 +1,40 @@
 <script setup lang="ts">
 /**
- * The busiest programs, by processor or by memory, one line each.
+ * The busiest programs, by processor, by graphics card or by memory,
+ * one line each.
  */
 import { computed, ref } from "vue";
 import { useSystemStore } from "@/stores/system";
 import { formatSize } from "@/utilities/format-size";
 import type { ProcessInformation } from "@/interfaces/SystemInformation";
 
-type SortBy = "cpu" | "mem";
+type SortBy = "cpu" | "gpu" | "mem";
 
 const FEW = 5;
 
 const system = useSystemStore();
-const sortBy = ref<SortBy>("cpu");
+// The order asked for; ``sortBy`` below is the one shown.
+const chosen = ref<SortBy>("cpu");
 const showAll = ref(false);
 
 const source = computed(() => (system.live ? system.realtime : system.data));
 
-// The collector sends two lists, the ten busiest by each measure, with
-// both figures on every entry.
+// The collector sends a list for each measure, the ten busiest by it,
+// with every figure on every entry. The one by graphics card comes only
+// from a collector that can tell who is using the card (Windows).
+const byGpu = computed(() => source.value.processes_by_gpu ?? []);
+const canSortByGpu = computed(() => byGpu.value.length > 0);
+
+// That list can go again (another machine is looked at), and the order
+// falls back to the processor until it is there again.
+const sortBy = computed<SortBy>(() =>
+  chosen.value === "gpu" && !canSortByGpu.value ? "cpu" : chosen.value,
+);
+
 const listed = computed<ProcessInformation[]>(() => {
   const byMem = source.value.processes ?? [];
   const byCpu = source.value.processes_by_cpu ?? [];
+  if (sortBy.value === "gpu") return byGpu.value;
   if (sortBy.value === "cpu" && byCpu.length > 0) return byCpu;
   return byMem;
 });
@@ -39,8 +52,9 @@ const showGpu = computed(() => listed.value.some((p) => typeof p.gpu === "number
 const rows = computed(() => {
   const all = listed.value;
   const amount = (p: ProcessInformation) =>
-    sortBy.value === "cpu" ? (cpuOf(p) ?? 0) : (p.mem ?? 0);
-  const most = Math.max(...all.map(amount), sortBy.value === "cpu" ? 1 : 0.001);
+    sortBy.value === "cpu" ? (cpuOf(p) ?? 0) : sortBy.value === "gpu" ? (p.gpu ?? 0) : (p.mem ?? 0);
+  // Against a whole percent at least, so an idle machine fills no bars.
+  const most = Math.max(...all.map(amount), sortBy.value === "mem" ? 0.001 : 1);
   return all.slice(0, showAll.value ? all.length : FEW).map((p) => ({
     key: `${p.name}:${p.pid}`,
     name: p.name,
@@ -94,19 +108,36 @@ const canShowMore = computed(() => listed.value.length > FEW);
               class="sort-button"
               :class="{ active: sortBy === 'cpu' }"
               title="Sort by CPU"
-              @click="sortBy = 'cpu'"
+              @click="chosen = 'cpu'"
             >
               CPU
             </button>
           </th>
-          <th v-if="showGpu" class="col-num" scope="col">GPU</th>
+          <th
+            v-if="showGpu"
+            class="col-num"
+            scope="col"
+            :aria-sort="canSortByGpu ? (sortBy === 'gpu' ? 'descending' : 'none') : undefined"
+          >
+            <button
+              v-if="canSortByGpu"
+              type="button"
+              class="sort-button"
+              :class="{ active: sortBy === 'gpu' }"
+              title="Sort by GPU"
+              @click="chosen = 'gpu'"
+            >
+              GPU
+            </button>
+            <template v-else>GPU</template>
+          </th>
           <th class="col-num col-mem" scope="col" :aria-sort="sortBy === 'mem' ? 'descending' : 'none'">
             <button
               type="button"
               class="sort-button"
               :class="{ active: sortBy === 'mem' }"
               title="Sort by memory"
-              @click="sortBy = 'mem'"
+              @click="chosen = 'mem'"
             >
               Memory
             </button>

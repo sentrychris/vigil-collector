@@ -335,3 +335,105 @@ pub fn collect_top_cpu(sys: &System, users: &Users, gpu: &GpuByProcess) -> Vec<P
         })
         .collect()
 }
+
+/// Top-N processes by their share of the graphics card, aggregated by
+/// display name the way ``collect_top`` does. Few programs use the card
+/// at all, so the rest of the ten are the busiest on the processor.
+/// Empty where the card's use can't be told apart by process.
+pub fn collect_top_gpu(sys: &System, users: &Users, gpu: &GpuByProcess) -> Vec<Process> {
+    if gpu.is_none() {
+        return Vec::new();
+    }
+
+    let mut by_name: HashMap<String, Aggregated> = HashMap::new();
+
+    for (pid, proc_) in sys.processes() {
+        if skip_process(*pid, proc_) {
+            continue;
+        }
+
+        let entry = by_name.entry(display_name(proc_)).or_default();
+        entry.mem_mb += proc_.memory() as f64 / (1024.0 * 1024.0);
+        entry.cpu_pct += proc_.cpu_usage() as f64;
+        entry.gpu_pct += gpu_of(gpu, pid.as_u32());
+        entry.pids.push(pid.as_u32());
+        if let Some(username) = username_of(proc_, users) {
+            entry.usernames.insert(username);
+        }
+    }
+
+    let mut entries: Vec<(String, Aggregated)> = by_name.into_iter().collect();
+    entries.sort_by(|a, b| {
+        by_gpu(
+            (a.1.gpu_pct, a.1.cpu_pct, &a.0),
+            (b.1.gpu_pct, b.1.cpu_pct, &b.0),
+        )
+    });
+
+    const TOP_N: usize = 10;
+    entries.truncate(TOP_N);
+
+    // Memory by the accounting the other two lists use.
+    let pss = pss_supported(sys);
+
+    entries
+        .into_iter()
+        .map(|(name, agg)| Process {
+            pid: agg.pids.iter().min().copied().unwrap_or(0),
+            mem: round2(if pss {
+                group_pss_mb(sys, &agg)
+            } else {
+                agg.mem_mb
+            }),
+            cpu: round2(agg.cpu_pct),
+            gpu: group_gpu(gpu, agg.gpu_pct),
+            username: agg.usernames.into_iter().collect::<Vec<_>>().join(", "),
+            name,
+        })
+        .collect()
+}
+
+/// The order of the list by graphics card: most of the card first, as
+/// the figure is shown (two decimals, held to 100), then most of the
+/// processor, then by name so that equals keep their places from scan
+/// to scan. Each side is its card share, its CPU% and its name.
+fn by_gpu(a: (f64, f64, &str), b: (f64, f64, &str)) -> std::cmp::Ordering {
+    let shown = |pct: f64| round2(pct.min(100.0));
+    shown(b.0)
+        .total_cmp(&shown(a.0))
+        .then_with(|| b.1.total_cmp(&a.1))
+        .then_with(|| a.2.cmp(b.2))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::by_gpu;
+
+    #[test]
+    fn the_list_by_gpu_falls_back_to_cpu_and_then_the_name() {
+        let mut groups = [
+            (0.0, 3.0, "explorer.exe"),
+            (41.5, 2.0, "game.exe"),
+            (0.0, 80.0, "cargo.exe"),
+            (7.25, 300.0, "chrome.exe"),
+            (0.0, 3.0, "discord.exe"),
+            // Two that fill the card are told apart by the processor.
+            (240.0, 1.0, "miner.exe"),
+            (100.0, 9.0, "render.exe"),
+        ];
+        groups.sort_by(|a, b| by_gpu(*a, *b));
+        let names: Vec<&str> = groups.iter().map(|group| group.2).collect();
+        assert_eq!(
+            names,
+            [
+                "render.exe",
+                "miner.exe",
+                "game.exe",
+                "chrome.exe",
+                "cargo.exe",
+                "discord.exe",
+                "explorer.exe",
+            ]
+        );
+    }
+}

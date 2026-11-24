@@ -77,4 +77,15 @@ describe("System Store", () => {
 
     expect(system.realtime.processes_by_cpu).toEqual([]);
   });
+
+  it("drops the list by GPU when a reading comes without one", () => {
+    const system = useSystemStore();
+    const game = { pid: 7, username: "chris", name: "game.exe", cpu: 40, mem: 900, gpu: 82.5 };
+
+    system.liveUpdate({ ...reading(8), processes_by_gpu: [game] });
+    expect(system.realtime.processes_by_gpu).toEqual([game]);
+
+    system.liveUpdate(reading(9));
+    expect(system.realtime.processes_by_gpu).toEqual([]);
+  });
 });

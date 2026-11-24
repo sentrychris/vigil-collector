@@ -25,18 +25,31 @@ const byCpu = [
 ];
 const byMem = [...byCpu].sort((a, b) => b.mem - a.mem);
 
-function mounted(withGpu = false) {
+// How much of the graphics card each uses, on a machine that can tell.
+const gpuOf: Record<string, number> = {
+  "chrome.exe": 21.37,
+  "discord.exe": 64.2,
+  "explorer.exe": 0.4,
+};
+
+/**
+ * ``withGpu``: a collector that can tell says how much of the graphics
+ * card each process uses, and the others leave it out. ``listByGpu``:
+ * it also sends the ten using the card most, which one from before that
+ * list was added doesn't.
+ */
+function mounted(withGpu = false, listByGpu = withGpu) {
   const pinia = createPinia();
   setActivePinia(pinia);
   const system = useSystemStore();
-  // A collector that can tell says how much of the graphics card each
-  // process uses; the others leave it out.
-  const told = (list: typeof byCpu) =>
-    withGpu ? list.map((p) => ({ ...p, gpu: p.name === "chrome.exe" ? 21.37 : 0 })) : list;
+  const withShare = (list: typeof byCpu) => list.map((p) => ({ ...p, gpu: gpuOf[p.name] ?? 0 }));
+  const told = (list: typeof byCpu) => (withGpu ? withShare(list) : list);
+  const byGpu = withShare(byCpu).sort((a, b) => b.gpu - a.gpu || b.cpu - a.cpu);
   system.staticUpdate({
     cpu: { usage: 8.21, freq: 3200, temp: 52, cores: 16 },
     processes: told(byMem),
     processes_by_cpu: told(byCpu),
+    ...(listByGpu ? { processes_by_gpu: byGpu } : {}),
   } as unknown as SystemResponse);
   const wrapper = mount(CompactProcesses, {
     global: { plugins: [pinia], stubs: ["FontAwesomeIcon"] },
@@ -121,6 +134,60 @@ describe("CompactProcesses", () => {
     // claude.exe, then chrome.exe: processor, graphics card, memory.
     expect(rows()[0].slice(2)).toEqual(["12.7%", "0.0%", "3.07GiB"]);
     expect(rows()[1].slice(2)).toEqual(["2.4%", "21.4%", "2.08GiB"]);
+  });
+
+  it("sorts by GPU when its heading is pressed", async () => {
+    const { wrapper, rows } = mounted(true);
+
+    await wrapper.find('button[title="Sort by GPU"]').trigger("click");
+
+    // Those using the card, most first, and then the busiest on the
+    // processor.
+    expect(rows().map((row) => [row[0], row[3]])).toEqual([
+      ["discord.exe", "64.2%"],
+      ["chrome.exe", "21.4%"],
+      ["explorer.exe", "0.4%"],
+      ["claude.exe", "0.0%"],
+      ["msedgewebview2.exe", "0.0%"],
+    ]);
+    const headings = wrapper.findAll("thead th");
+    expect(headings[3].attributes("aria-sort")).toBe("descending");
+    expect(headings[2].attributes("aria-sort")).toBe("none");
+    // The bars are each one's share of the busiest on the card.
+    const bars = wrapper.findAll(".share-fill").map((bar) => bar.attributes("style"));
+    expect(bars[0]).toContain("width: 100%");
+    expect(bars[3]).toContain("width: 2%");
+
+    await wrapper.find('button[title="Sort by CPU"]').trigger("click");
+    expect(rows()[0][0]).toBe("claude.exe");
+    expect(headings[3].attributes("aria-sort")).toBe("none");
+  });
+
+  it("leaves the GPU heading as words for a collector that sends no list by GPU", () => {
+    const { wrapper } = mounted(true, false);
+
+    const heading = wrapper.findAll("thead th")[3];
+    expect(heading.text()).toBe("GPU");
+    expect(heading.find("button").exists()).toBe(false);
+    expect(heading.attributes("aria-sort")).toBeUndefined();
+  });
+
+  it("goes back to sorting by CPU when the list by GPU goes away", async () => {
+    const { wrapper, rows } = mounted(true);
+    await wrapper.find('button[title="Sort by GPU"]').trigger("click");
+    expect(rows()[0][0]).toBe("discord.exe");
+
+    // Another machine is looked at, and it can't tell.
+    useSystemStore().staticUpdate({
+      cpu: { usage: 8.21, freq: 3200, temp: 52, cores: 16 },
+      processes: byMem,
+      processes_by_cpu: byCpu,
+      processes_by_gpu: [],
+    } as unknown as SystemResponse);
+    await wrapper.vm.$nextTick();
+
+    expect(rows()[0][0]).toBe("claude.exe");
+    expect(wrapper.find("thead th:nth-child(3)").attributes("aria-sort")).toBe("descending");
   });
 
   it("has no GPU column when it doesn't", () => {

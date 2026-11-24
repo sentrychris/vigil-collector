@@ -529,18 +529,26 @@ component SortHeading inherits Rectangle {
     }
 }
 
+enum ProcessSort { cpu, gpu, memory }
+
 component Processes inherits Rectangle {
     in property <[ProcessRow]> by-cpu;
+    // Empty where the graphics card's use isn't known by process.
+    in property <[ProcessRow]> by-gpu;
     in property <[ProcessRow]> by-memory;
     // Whether to show each process's share of the graphics card.
     in property <bool> gpu;
     // The room the figures take on the right of each line.
     property <length> figures: root.gpu ? 182px : 130px;
-    property <bool> sort-by-cpu: true;
+    // The order asked for, and the one shown: the list by graphics card
+    // can go (the card is unplugged), and the order falls back to the
+    // processor until it is there again.
+    property <ProcessSort> chosen: ProcessSort.cpu;
+    property <ProcessSort> sort: self.chosen == ProcessSort.gpu && !(self.gpu && self.by-gpu.length > 0) ? ProcessSort.cpu : self.chosen;
     property <bool> show-all;
     // How many lines to show until asked for them all.
     property <int> few: 5;
-    property <[ProcessRow]> listed: self.sort-by-cpu && self.by-cpu.length > 0 ? self.by-cpu : self.by-memory;
+    property <[ProcessRow]> listed: self.sort == ProcessSort.gpu ? self.by-gpu : self.sort == ProcessSort.cpu && self.by-cpu.length > 0 ? self.by-cpu : self.by-memory;
 
     border-radius: 9px;
     background: Theme.surface;
@@ -619,31 +627,27 @@ component Processes inherits Rectangle {
                 x: parent.width - root.figures;
                 width: 52px;
                 label: "CPU";
-                active: root.sort-by-cpu;
+                active: root.sort == ProcessSort.cpu;
                 chosen => {
-                    root.sort-by-cpu = true;
+                    root.chosen = ProcessSort.cpu;
                 }
             }
-            // The list comes sorted by processor or by memory, so this
-            // one is a heading only.
-            if root.gpu: Text {
+            if root.gpu: SortHeading {
                 x: parent.width - 78px - 52px;
-                width: 42px;
-                text: "GPU";
-                font-family: Type.mono-semibold;
-                font-size: 9.5px;
-                letter-spacing: 1.14px;
-                color: Theme.dim;
-                horizontal-alignment: right;
-                vertical-alignment: center;
+                width: 52px;
+                label: "GPU";
+                active: root.sort == ProcessSort.gpu;
+                chosen => {
+                    root.chosen = ProcessSort.gpu;
+                }
             }
             SortHeading {
                 x: parent.width - 78px;
                 width: 78px;
                 label: "MEMORY";
-                active: !root.sort-by-cpu;
+                active: root.sort == ProcessSort.memory;
                 chosen => {
-                    root.sort-by-cpu = false;
+                    root.chosen = ProcessSort.memory;
                 }
             }
         }
@@ -955,6 +959,7 @@ export component CompactWindow inherits Window {
     in property <string> services-label;
 
     in property <[ProcessRow]> processes-by-cpu;
+    in property <[ProcessRow]> processes-by-gpu;
     in property <[ProcessRow]> processes-by-memory;
     in property <bool> processes-gpu;
 
@@ -1076,6 +1081,7 @@ export component CompactWindow inherits Window {
             }
             Processes {
                 by-cpu: root.processes-by-cpu;
+                by-gpu: root.processes-by-gpu;
                 by-memory: root.processes-by-memory;
                 gpu: root.processes-gpu;
             }

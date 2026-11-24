@@ -40,6 +40,7 @@ struct SamplerState {
     cached_processes: Vec<Process>,           // last top-N by memory (slow tier)
     cached_processes_metric: String,          // "pss" or "rss"
     cached_processes_by_cpu: Vec<ProcessCpu>, // last top-N by CPU (slow tier)
+    cached_processes_by_gpu: Vec<Process>,    // last top-N by GPU (slow tier, Windows)
 }
 ```
 
@@ -306,6 +307,14 @@ entry of both lists gets a `gpu` field: its members' shares of the
 graphics card added up, held to 100. Elsewhere the field is left out of
 the payload altogether, so the dashboards know not to show the column.
 The figures are the GPU thread's newest sample at the time of the scan.
+
+There the scan also makes a third list, `processes_by_gpu`: the ten
+groups using the card most (`collect_top_gpu`). Few programs use the
+card at all, so ties, which are mostly at zero, go to the busiest on the
+processor and then by name, and the list is always ten long. It is what
+the GPU heading of the compact process list sorts by (in the window and
+in the web page alike); where it is missing from the payload that
+heading is not a button.
 
 The `processes_metric` string in the snapshot tells the dashboard which
 algorithm produced the numbers — important because PSS values are typically

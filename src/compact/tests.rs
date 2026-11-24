@@ -47,6 +47,16 @@ pub(super) fn snapshot(second: u32) -> Snapshot {
     for p in &mut s.processes_by_cpu {
         p.gpu = Some(share(&p.name));
     }
+    // And the list by graphics card: those using it first, then the
+    // busiest on the processor.
+    let mut by_gpu = s.processes.clone();
+    by_gpu.sort_by(|a, b| {
+        b.gpu
+            .partial_cmp(&a.gpu)
+            .unwrap()
+            .then(b.cpu.total_cmp(&a.cpu))
+    });
+    s.processes_by_gpu = by_gpu;
     s
 }
 
@@ -338,6 +348,23 @@ fn pressing_view_all_lists_every_process() {
     shown.click(380.0, sixth_row_y - 5.5 * 22.0 - 22.0 - 17.0);
     shown.save("compact-all-processes");
     assert_ne!(below, shown.at(100.0, sixth_row_y + 30.0));
+}
+
+#[test]
+fn pressing_the_gpu_heading_sorts_by_the_graphics_card() {
+    let mut shown = Shown::new(420, 752, 1.0, true);
+    let rows_y = 33.0 + 8.0 + 5.0 * 52.0 + 2.0 * 9.0 + 46.0 + 6.0 + 34.0 + 6.0 + 34.0 + 22.0;
+    // A third of the way along the second row's bar. By processor that
+    // row is Code, at two fifths of the busiest; by graphics card it is
+    // Discord, at a seventh.
+    let bar = (182.0, rows_y + 22.0 + 11.0);
+    let green = shown.at(bar.0, bar.1);
+    shown.click(305.0, rows_y - 11.0);
+    shown.save("compact-processes-by-gpu");
+    assert_ne!(green, shown.at(bar.0, bar.1));
+    // And back by the processor's heading.
+    shown.click(253.0, rows_y - 11.0);
+    assert_eq!(green, shown.at(bar.0, bar.1));
 }
 
 #[test]
