@@ -1,5 +1,7 @@
 import type {
   CpuInformation,
+  GpuInformation,
+  MemoryInformation,
   UsageInformation,
   DiskUsageInformation,
   DiskIoInformation,
@@ -10,7 +12,10 @@ import type {
 
 export interface SystemResponse {
   cpu: CpuInformation;
-  mem: UsageInformation;
+  /** ``null`` on a machine with no graphics card the collector can read;
+   *  left out by older collectors. */
+  gpu?: GpuInformation | null;
+  mem: MemoryInformation;
   disk: UsageInformation;
   disks: DiskUsageInformation[];
   disk_io: DiskIoInformation;
@@ -23,7 +28,8 @@ export interface SystemResponse {
 
 export interface RealtimeSystemResponse {
   cpu: CpuInformation;
-  mem: UsageInformation;
+  gpu?: GpuInformation | null;
+  mem: MemoryInformation;
   disk: UsageInformation;
   disk_io: DiskIoInformation;
   network: NetworkRateInformation;

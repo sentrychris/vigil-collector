@@ -9,6 +9,7 @@ import { useSystemStore } from "@/stores/system";
 import { formatSize } from "@/utilities/format-size";
 import { formatRate } from "@/utilities/format-rate";
 import { mapTemperatureColor } from "@/utilities/color-map";
+import { gpuModel, memoryName } from "@/utilities/hardware";
 import CompactCard from "./CompactCard.vue";
 import CompactProcesses from "./CompactProcesses.vue";
 import CompactServices from "./CompactServices.vue";
@@ -58,6 +59,9 @@ function usage(detail: { used?: number; total?: number; free?: number } | undefi
   };
 }
 const memory = computed(() => usage(now.value.mem));
+// The graphics card, on a machine that has one the collector can read.
+const gpu = computed(() => now.value.gpu ?? null);
+const gpuMemory = computed(() => usage(gpu.value?.mem));
 const disk = computed(() => usage(now.value.disk));
 
 const rate = (bytes: number | undefined) => formatRate(bytes ?? 0);
@@ -86,6 +90,7 @@ const TX = "var(--t-rose)";
 
     <CompactCard
       title="CPU"
+      :name="now.cpu?.name || undefined"
       icon="fa-solid fa-microchip"
       tone="purple"
       :value="percent(now.cpu?.usage, 1)"
@@ -109,7 +114,32 @@ const TX = "var(--t-rose)";
     </CompactCard>
 
     <CompactCard
+      v-if="gpu"
+      title="GPU"
+      :name="gpuModel(gpu.name) || undefined"
+      icon="fa-solid fa-gpu-card"
+      tone="pink"
+      :value="percent(gpu.usage, 1)"
+      unit="%"
+    >
+      <template #sub>
+        {{ gpuMemory.used }} / {{ gpuMemory.total }} {{ gpuMemory.unit }}<template v-if="gpu.temp > 0">
+          ·
+          <span :style="{ color: mapTemperatureColor(gpu.temp) }">{{ gpu.temp.toFixed(0) }} °C</span>
+        </template>
+      </template>
+      <template #spark>
+        <SparkLine
+          :series="[{ values: system.history.gpu, color: 'var(--t-pink)' }]"
+          :floor="25"
+          label="GPU use over the last minute"
+        />
+      </template>
+    </CompactCard>
+
+    <CompactCard
       title="Memory"
+      :name="memoryName(now.mem) || undefined"
       icon="fa-solid fa-memory"
       tone="amber"
       :value="percent(now.mem?.percent, 1)"
@@ -222,6 +252,7 @@ const TX = "var(--t-rose)";
      are lit up to stand out from near-black. */
   --t-blue: #3b82f6;
   --t-purple: #9a5cf0;
+  --t-pink: #db3f93;
   --t-amber: #d98a0b;
   --t-green: #10a37a;
   --t-cyan: #0e9bb8;
@@ -243,6 +274,7 @@ body[data-theme="dark"] .compact-root {
   --c-crit: #f87171;
   --t-blue: #60a5fa;
   --t-purple: #c084fc;
+  --t-pink: #f472b6;
   --t-amber: #fbbf24;
   --t-green: #34d399;
   --t-cyan: #22d3ee;

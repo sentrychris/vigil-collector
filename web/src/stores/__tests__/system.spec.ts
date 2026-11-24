@@ -50,6 +50,26 @@ describe("System Store", () => {
     expect(system.history.cpu[HISTORY_LENGTH - 1]).toBe(HISTORY_LENGTH + 4);
   });
 
+  it("keeps the graphics card's readings too, and nothing where there is no card", () => {
+    const system = useSystemStore();
+    const gpu = (usage: number) => ({
+      name: "NVIDIA GeForce RTX 3070",
+      usage,
+      temp: 54,
+      mem: { total: 8, used: 2, free: 6, percent: 25 },
+    });
+
+    system.liveUpdate({ ...reading(8), gpu: gpu(40) });
+    system.liveUpdate({ ...reading(9), gpu: gpu(55) });
+    expect(system.history.gpu).toEqual([40, 55]);
+    expect(system.realtime.gpu?.name).toBe("NVIDIA GeForce RTX 3070");
+
+    // The card goes away (or the collector has none to read).
+    system.liveUpdate({ ...reading(9), gpu: null });
+    expect(system.realtime.gpu).toBeNull();
+    expect(system.history.gpu).toEqual([40, 55, 0]);
+  });
+
   it("takes a reading from an older collector, without the list by CPU", () => {
     const system = useSystemStore();
 

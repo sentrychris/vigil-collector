@@ -31,6 +31,7 @@ pub enum Series {
     DiskIo = 2,
     Sent = 3,
     Received = 4,
+    Gpu = 5,
 }
 
 impl Series {
@@ -41,6 +42,7 @@ impl Series {
             Series::DiskIo,
             Series::Sent,
             Series::Received,
+            Series::Gpu,
         ]
         .into_iter()
         .find(|series| *series as i32 == index)
@@ -55,6 +57,7 @@ pub struct History {
     disk_io: Vec<f64>,
     sent: Vec<f64>,
     received: Vec<f64>,
+    gpu: Vec<f64>,
 }
 
 impl History {
@@ -73,6 +76,12 @@ impl History {
         );
         keep(&mut self.sent, snapshot.network.tx_bytes_per_sec as f64);
         keep(&mut self.received, snapshot.network.rx_bytes_per_sec as f64);
+        // Nothing while there is no card, so one that turns up later
+        // starts its line from there.
+        keep(
+            &mut self.gpu,
+            snapshot.gpu.as_ref().map_or(0.0, |gpu| gpu.usage),
+        );
     }
 
     fn of(&self, series: Series) -> &[f64] {
@@ -82,6 +91,7 @@ impl History {
             Series::DiskIo => &self.disk_io,
             Series::Sent => &self.sent,
             Series::Received => &self.received,
+            Series::Gpu => &self.gpu,
         }
     }
 
@@ -90,6 +100,7 @@ impl History {
     fn top(&self, series: Series) -> f64 {
         match series {
             Series::Cpu => Scale::AtLeast(25.0).top(&[&self.cpu]),
+            Series::Gpu => Scale::AtLeast(25.0).top(&[&self.gpu]),
             Series::Memory => Scale::Top(100.0).top(&[]),
             Series::DiskIo => Scale::AtLeast(1024.0 * 1024.0).top(&[&self.disk_io]),
             Series::Sent | Series::Received => {
@@ -159,6 +170,7 @@ pub fn show(ui: &CompactWindow, snapshot: &Snapshot) {
     ui.set_uptime(or_dash(&short_uptime(&snapshot.uptime)).into());
 
     ui.set_cpu_value(percent(snapshot.cpu.usage).into());
+    ui.set_cpu_name(snapshot.cpu.name.as_str().into());
     ui.set_cpu_detail(cpu_detail(snapshot.cpu.freq, snapshot.cpu.cores).into());
     if snapshot.cpu.temp > 0.0 {
         ui.set_cpu_temperature(format!("{:.0} °C", snapshot.cpu.temp).into());
@@ -167,8 +179,23 @@ pub fn show(ui: &CompactWindow, snapshot: &Snapshot) {
         ui.set_cpu_temperature(SharedString::new());
     }
 
+    ui.set_gpu_shown(snapshot.gpu.is_some());
+    if let Some(gpu) = &snapshot.gpu {
+        let memory = Usage::of(gpu.mem.used, gpu.mem.total, gpu.mem.free);
+        ui.set_gpu_value(percent(gpu.usage).into());
+        ui.set_gpu_name(gpu_model(&gpu.name).into());
+        ui.set_gpu_detail(format!("{} / {} {}", memory.used, memory.total, memory.unit).into());
+        if gpu.temp > 0.0 {
+            ui.set_gpu_temperature(format!("{:.0} °C", gpu.temp).into());
+            ui.set_gpu_temperature_color(temperature_color(gpu.temp));
+        } else {
+            ui.set_gpu_temperature(SharedString::new());
+        }
+    }
+
     let memory = Usage::of(snapshot.mem.used, snapshot.mem.total, snapshot.mem.free);
     ui.set_memory_value(percent(snapshot.mem.percent).into());
+    ui.set_memory_name(memory_name(&snapshot.mem.kind, &snapshot.mem.manufacturer).into());
     ui.set_memory_share(snapshot.mem.percent as f32);
     ui.set_memory_detail(
         format!(
@@ -196,6 +223,10 @@ pub fn show(ui: &CompactWindow, snapshot: &Snapshot) {
     ui.set_network_down(format!("↓ {}", rate(snapshot.network.rx_bytes_per_sec as f64)).into());
     ui.set_network_up(format!("↑ {}", rate(snapshot.network.tx_bytes_per_sec as f64)).into());
 
+    ui.set_processes_gpu(
+        snapshot.processes.iter().any(|p| p.gpu.is_some())
+            || snapshot.processes_by_cpu.iter().any(|p| p.gpu.is_some()),
+    );
     let (by_cpu, by_memory) = process_rows(snapshot);
     if let Some(rows) = changed(&ui.get_processes_by_cpu(), by_cpu) {
         ui.set_processes_by_cpu(rows);
@@ -292,12 +323,16 @@ fn overall(rows: &[ServiceRow]) -> (i32, String) {
 /// as a share of the whole machine, the scale the CPU card uses.
 fn process_rows(snapshot: &Snapshot) -> (Vec<ProcessRow>, Vec<ProcessRow>) {
     let cores = f64::from(snapshot.cpu.cores.max(1));
-    let row = |name: &str, cpu: f64, mem: f64, amount: f64, most: f64| {
+    let row = |name: &str, cpu: f64, gpu: Option<f64>, mem: f64, amount: f64, most: f64| {
         let (mem, mem_unit) = process_memory(mem);
         ProcessRow {
             name: name.to_uppercase().into(),
             share: (amount / most * 100.0).clamp(2.0, 100.0) as f32,
             cpu: format!("{:.1}", cpu / cores).into(),
+            gpu: gpu
+                .map(|gpu| format!("{gpu:.1}"))
+                .unwrap_or_default()
+                .into(),
             mem: mem.into(),
             mem_unit: mem_unit.into(),
         }
@@ -309,7 +344,7 @@ fn process_rows(snapshot: &Snapshot) -> (Vec<ProcessRow>, Vec<ProcessRow>) {
     let by_cpu = snapshot
         .processes_by_cpu
         .iter()
-        .map(|p| row(&p.name, p.cpu, p.mem, p.cpu / cores, most_cpu))
+        .map(|p| row(&p.name, p.cpu, p.gpu, p.mem, p.cpu / cores, most_cpu))
         .collect();
     let most_memory = snapshot
         .processes
@@ -318,7 +353,7 @@ fn process_rows(snapshot: &Snapshot) -> (Vec<ProcessRow>, Vec<ProcessRow>) {
     let by_memory = snapshot
         .processes
         .iter()
-        .map(|p| row(&p.name, p.cpu, p.mem, p.mem, most_memory))
+        .map(|p| row(&p.name, p.cpu, p.gpu, p.mem, p.mem, most_memory))
         .collect();
     (by_cpu, by_memory)
 }
@@ -362,6 +397,25 @@ fn cpu_detail(mhz: f64, cores: u32) -> String {
     } else {
         format!("{mhz:.0} MHz · {cores} cores")
     }
+}
+
+/// A graphics card's model without its maker, which the card has no room
+/// for: "NVIDIA GeForce RTX 3070" as "GeForce RTX 3070".
+fn gpu_model(name: &str) -> &str {
+    ["NVIDIA ", "AMD ", "Intel "]
+        .iter()
+        .find_map(|maker| name.strip_prefix(maker))
+        .filter(|model| !model.is_empty())
+        .unwrap_or(name)
+}
+
+/// What memory is fitted, as much as is known: "DDR4 · Corsair".
+fn memory_name(kind: &str, manufacturer: &str) -> String {
+    [kind, manufacturer]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" · ")
 }
 
 /// Green to 50 °C, orange to 70, red beyond (the web dashboard's
@@ -487,11 +541,11 @@ fn rate(bytes_per_second: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        History, Series, Unit, Usage, cpu_detail, overall, percent, process_memory, process_rows,
-        rate, service_row, short_uptime, size, status,
+        History, Series, Unit, Usage, cpu_detail, gpu_model, memory_name, overall, percent,
+        process_memory, process_rows, rate, service_row, short_uptime, size, status,
     };
     use crate::server::probes::ProbeResult;
-    use crate::snapshot::{Process, ProcessCpu, Snapshot};
+    use crate::snapshot::{Gpu, Process, ProcessCpu, Snapshot};
 
     #[test]
     fn uptime_is_shortened_to_initials() {
@@ -570,6 +624,7 @@ mod tests {
                 username: "chris".into(),
                 cpu: 200.0,
                 mem: 455.0,
+                gpu: Some(41.26),
             },
             ProcessCpu {
                 pid: 2,
@@ -577,6 +632,7 @@ mod tests {
                 username: "chris".into(),
                 cpu: 0.0,
                 mem: 7.0,
+                gpu: None,
             },
         ];
         snapshot.processes = vec![Process {
@@ -585,6 +641,7 @@ mod tests {
             username: "chris".into(),
             mem: 455.0,
             cpu: 200.0,
+            gpu: Some(41.26),
         }];
         snapshot
     }
@@ -600,6 +657,35 @@ mod tests {
         assert_eq!(by_cpu[1].share, 2.0);
         assert_eq!(by_memory[0].mem, "455");
         assert_eq!(by_memory[0].share, 100.0);
+        // Its share of the graphics card, and blank where that isn't known.
+        assert_eq!(by_cpu[0].gpu, "41.3");
+        assert_eq!(by_cpu[1].gpu, "");
+        assert_eq!(by_memory[0].gpu, "41.3");
+    }
+
+    #[test]
+    fn part_names_are_cut_to_what_matters() {
+        assert_eq!(gpu_model("NVIDIA GeForce RTX 3070"), "GeForce RTX 3070");
+        assert_eq!(gpu_model("AMD Radeon RX 6800 XT"), "Radeon RX 6800 XT");
+        assert_eq!(gpu_model("Intel UHD Graphics 750"), "UHD Graphics 750");
+        assert_eq!(gpu_model("Graphics card"), "Graphics card");
+        assert_eq!(memory_name("DDR4", "Corsair"), "DDR4 · Corsair");
+        assert_eq!(memory_name("DDR5", ""), "DDR5");
+        assert_eq!(memory_name("", ""), "");
+    }
+
+    #[test]
+    fn the_graphics_card_has_a_line_of_its_own() {
+        let mut history = History::default();
+        let mut snapshot = Snapshot::default();
+        history.remember(&snapshot);
+        snapshot.gpu = Some(Gpu {
+            usage: 80.0,
+            ..Gpu::default()
+        });
+        history.remember(&snapshot);
+        assert_eq!(history.of(Series::Gpu), [0.0, 80.0]);
+        assert_eq!(history.top(Series::Gpu), 80.0 * 1.15);
     }
 
     fn probe(ok: bool, latency_ms: u64) -> ProbeResult {

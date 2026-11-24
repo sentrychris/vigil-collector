@@ -180,6 +180,38 @@ and returns a fresh value.
 - `load`: `[1m, 5m, 15m]` via `libc::getloadavg(3)` for full kernel
   precision (sysinfo's `/proc/loadavg` parser truncates to 2 decimals).
   `null` on Windows, which has no load average.
+- `name`: the brand string, tidied once at startup into a model
+  ("11th Gen Intel(R) Core(TM) i7-11700 @ 2.50GHz" becomes "Intel Core
+  i7-11700").
+
+### GPU ([metrics/gpu.rs](../src/metrics/gpu.rs))
+
+`Snapshot::gpu` is `None` wherever there is no card a reader can read,
+which serializes as `null`; the dashboards then leave the GPU card out.
+
+- **Windows** ([gpu_windows.rs](../src/metrics/gpu_windows.rs)): a 1 Hz
+  thread, like the CPU temperature's, so a slow counter read can't stall
+  the sampler, which only clones the newest reading from behind a mutex.
+  It samples three PDH counters over all their instances
+  ([pdh.rs](../src/metrics/pdh.rs)): `GPU Engine(*)\Utilization
+  Percentage` (one instance per process per engine per card) and `GPU
+  Adapter Memory(*)\Dedicated Usage` and `Shared Usage`. The instance
+  names carry the pid, the card's LUID and the engine;
+  [gpu_counters.rs](../src/metrics/gpu_counters.rs) takes them apart and
+  adds them up, as pure functions tested on every platform. A card's
+  usage is each engine's summed over processes, then the busiest engine.
+  Every 30 polls the thread asks which cards there are (`D3DKMT` calls in
+  gdi32: name, memory sizes, and flags that rule out the software
+  renderer and display-only adapters), and each poll it asks the chosen
+  card's driver for its temperature. The first sample of a rate counter
+  has no value, so nothing is published until the second.
+- **Linux** ([gpu_linux.rs](../src/metrics/gpu_linux.rs)): plain files
+  under `/sys/class/drm/card*/device`, read on the sampler's tick. A card
+  the kernel has runtime-suspended is reported idle without being read,
+  which would wake it.
+
+The same Windows sample also gives usage by pid, which the sampler hands
+to the process collector on its slow tick (see Process below).
 
 ### Memory ([metrics/mem.rs](../src/metrics/mem.rs))
 
@@ -187,6 +219,12 @@ Uses `sys.available_memory()` as the basis for `free`/`used`, so
 `used + free == total`. The raw `used` and `free` fields would exclude
 reclaimable cache and break that identity, psutil's behavior is what we
 match.
+
+`type` and `manufacturer` describe the modules fitted. They come from the
+firmware's SMBIOS table ([smbios.rs](../src/metrics/smbios.rs)), read and
+parsed once when the sampler's state is built: `GetSystemFirmwareTable`
+on Windows, `/sys/firmware/dmi/tables/DMI` on Linux (root only). Where it
+can't be read both are empty strings.
 
 ### Disk ([metrics/disk.rs](../src/metrics/disk.rs))
 
@@ -262,6 +300,12 @@ time, so it would top `processes_by_cpu` on any machine that isn't busy.
 The representative `pid` for a name group is the lowest pid for the memory
 list and the highest-CPU member for the CPU list, so both are stable from
 scan to scan.
+
+Where the GPU reader can tell usage apart by process (Windows), every
+entry of both lists gets a `gpu` field: its members' shares of the
+graphics card added up, held to 100. Elsewhere the field is left out of
+the payload altogether, so the dashboards know not to show the column.
+The figures are the GPU thread's newest sample at the time of the scan.
 
 The `processes_metric` string in the snapshot tells the dashboard which
 algorithm produced the numbers — important because PSS values are typically

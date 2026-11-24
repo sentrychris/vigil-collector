@@ -33,8 +33,13 @@ struct SamplerState {
     disks: Disks,
     networks: Networks,
     sensors: Sensors,
+    gpu: metrics::gpu::Reader,
     users: Users,
     cores: u32,
+    /// The processor's model and the memory fitted: read once, as
+    /// neither changes while the machine runs.
+    cpu_name: String,
+    modules: metrics::smbios::Modules,
     disk_io_prev: Option<DiskIoPrev>,
     net_io_prev: Option<NetIoPrev>,
     tick: u64,
@@ -58,13 +63,17 @@ impl SamplerState {
         let users = Users::new()?;
         let sensors = Sensors::new();
         let cores = sys.cpus().len() as u32;
+        let cpu_name = metrics::cpu::model(&sys);
         Ok(Self {
             sys,
             disks,
             networks,
             sensors,
+            gpu: metrics::gpu::Reader::start(),
             users,
             cores,
+            cpu_name,
+            modules: metrics::smbios::modules(),
             disk_io_prev: None,
             net_io_prev: None,
             tick: 0,
@@ -106,11 +115,17 @@ impl SamplerState {
                 true,
                 metrics::process::refresh_kind(),
             );
-            self.cached_processes = metrics::process::collect_top(&self.sys, &self.users);
+            // Which process is using the graphics card, where that is
+            // known: as it was at the card's newest reading.
+            #[cfg(windows)]
+            let gpu = self.gpu.by_process();
+            #[cfg(not(windows))]
+            let gpu = None;
+            self.cached_processes = metrics::process::collect_top(&self.sys, &self.users, &gpu);
             self.cached_processes_metric =
                 metrics::process::process_metric_label(&self.sys).to_string();
             self.cached_processes_by_cpu =
-                metrics::process::collect_top_cpu(&self.sys, &self.users);
+                metrics::process::collect_top_cpu(&self.sys, &self.users, &gpu);
         }
 
         // Slow, every-Mth-tick: re-scan the mount table to catch new
@@ -126,8 +141,9 @@ impl SamplerState {
 
         self.tick = self.tick.wrapping_add(1);
 
-        let cpu = metrics::cpu::collect(&self.sys, &self.sensors, self.cores);
-        let mem = metrics::mem::collect(&self.sys);
+        let cpu = metrics::cpu::collect(&self.sys, &self.sensors, self.cores, &self.cpu_name);
+        let gpu = self.gpu.read();
+        let mem = metrics::mem::collect(&self.sys, &self.modules);
         let disk_root = metrics::disk::collect_root(&self.disks);
         let all_disks = metrics::disk::collect_all(&self.disks);
         let disk_io = metrics::disk::collect_io(&mut self.disk_io_prev);
@@ -140,6 +156,7 @@ impl SamplerState {
 
         Snapshot {
             cpu,
+            gpu,
             mem,
             disk: disk_root,
             disks: all_disks,

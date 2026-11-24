@@ -40,6 +40,9 @@ const CLASS_NAME: &str = "VigilCompactWindow";
 /// At the first, everything fits without scrolling.
 const DEFAULT_SIZE: (i32, i32) = (420, 580);
 const MIN_SIZE: (i32, i32) = (360, 300);
+/// How much taller the first size is on a machine with a graphics card,
+/// which has a card more to fit: the card and the gap under it.
+const GPU_CARD_HEIGHT: i32 = 46 + 6;
 
 /// Posted by the collector's thread: there are new readings.
 const WM_READINGS: u32 = WM_APP + 1;
@@ -182,7 +185,11 @@ fn raise(feed: &Feed, look: WindowLook, place: Option<WindowPlace>) -> Result<Rc
             style: WS_OVERLAPPEDWINDOW & !WS_MAXIMIZEBOX,
             procedure: Some(window_proc),
             place,
-            size: DEFAULT_SIZE,
+            size: if feed.readings.borrow().gpu.is_some() {
+                (DEFAULT_SIZE.0, DEFAULT_SIZE.1 + GPU_CARD_HEIGHT)
+            } else {
+                DEFAULT_SIZE
+            },
         })?
     };
     let link = Rc::new(RefCell::new(None));

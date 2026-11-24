@@ -64,12 +64,16 @@ windows-sys = { version = "0.61", features = [
     "Win32_System_LibraryLoader",
     "Win32_System_Performance",
     "Win32_System_RemoteDesktop",
+    "Win32_System_SystemInformation",
     "Win32_System_Threading",
     "Win32_Graphics_Gdi",
     "Win32_UI_HiDpi",
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
+    # What each graphics card is called, its memory and its temperature
+    # (metrics/gpu_windows.rs).
+    "Wdk_Graphics_Direct3D",
 ] }
 # LibreHardwareMonitor's sensors, read through its WMI namespace.
 wmi = { version = "0.18", default-features = false }

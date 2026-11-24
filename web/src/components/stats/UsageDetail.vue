@@ -4,6 +4,8 @@ import { formatSize } from "@/utilities/format-size";
 
 defineProps<{
   detail: UsageInformation;
+  /** What is fitted, where that is known: "DDR4 · Corsair" for memory. */
+  hardware?: string;
 }>();
 </script>
 
@@ -26,6 +28,10 @@ defineProps<{
     </div>
   </div>
   <div class="metric-rows">
+    <div v-if="hardware" class="metric-row">
+      <span class="row-label">TYPE</span>
+      <span class="row-value mono row-name" :title="hardware">{{ hardware }}</span>
+    </div>
     <div class="metric-row">
       <span class="row-label">FREE</span>
       <span class="row-value mono">{{ formatSize(detail.free).value }} <span class="row-unit">{{ formatSize(detail.free).unit }}</span></span>
@@ -101,7 +107,15 @@ defineProps<{
   display: flex;
   justify-content: space-between;
   align-items: baseline;
+  gap: 0.75rem;
   font-size: var(--fs-caption);
+}
+/* A part's name: cut short rather than wrapped where the card is narrow. */
+.row-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .row-label { color: #6b7280; }
 .row-value {

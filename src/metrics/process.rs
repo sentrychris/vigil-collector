@@ -11,6 +11,7 @@ use super::round2;
 struct Aggregated {
     mem_mb: f64,
     cpu_pct: f64,
+    gpu_pct: f64,
     pids: Vec<u32>,
     usernames: BTreeSet<String>,
 }
@@ -140,7 +141,25 @@ fn group_pss_mb(sys: &System, agg: &Aggregated) -> f64 {
     sum_bytes as f64 / (1024.0 * 1024.0)
 }
 
-pub fn collect_top(sys: &System, users: &Users) -> Vec<Process> {
+/// How busy each process keeps the graphics card, in percent, by pid;
+/// ``None`` where that can't be told apart by process, which leaves
+/// ``gpu`` out of every entry.
+pub type GpuByProcess = Option<HashMap<u32, f64>>;
+
+/// A group's share of the graphics card: its members' added up. They
+/// can share an engine, so the sum is held to the whole card.
+fn group_gpu(gpu: &GpuByProcess, pct: f64) -> Option<f64> {
+    gpu.as_ref().map(|_| round2(pct.min(100.0)))
+}
+
+fn gpu_of(gpu: &GpuByProcess, pid: u32) -> f64 {
+    gpu.as_ref()
+        .and_then(|by_pid| by_pid.get(&pid))
+        .copied()
+        .unwrap_or(0.0)
+}
+
+pub fn collect_top(sys: &System, users: &Users, gpu: &GpuByProcess) -> Vec<Process> {
     // First pass: aggregate by name using RSS only. PSS would require a
     // /proc/<pid>/smaps_rollup syscall per process — hundreds per slow tick
     // on a busy host. PSS ≤ RSS, which lets the second pass skip most of
@@ -158,6 +177,7 @@ pub fn collect_top(sys: &System, users: &Users) -> Vec<Process> {
         let entry = by_name.entry(name).or_default();
         entry.mem_mb += mem_mb;
         entry.cpu_pct += proc_.cpu_usage() as f64;
+        entry.gpu_pct += gpu_of(gpu, pid.as_u32());
         entry.pids.push(pid.as_u32());
         if let Some(username) = username_of(proc_, users) {
             entry.usernames.insert(username);
@@ -213,6 +233,7 @@ pub fn collect_top(sys: &System, users: &Users) -> Vec<Process> {
             username: agg.usernames.into_iter().collect::<Vec<_>>().join(", "),
             mem: round2(agg.mem_mb),
             cpu: round2(agg.cpu_pct),
+            gpu: group_gpu(gpu, agg.gpu_pct),
         })
         .collect()
 }
@@ -250,7 +271,7 @@ pub fn refresh_kind() -> sysinfo::ProcessRefreshKind {
 /// ticks (~5s), values reflect that window, not instantaneous load. The
 /// streaming bound used for PSS doesn't apply here: CPU% has no cheap
 /// upper bound, so we sort the full set and truncate.
-pub fn collect_top_cpu(sys: &System, users: &Users) -> Vec<ProcessCpu> {
+pub fn collect_top_cpu(sys: &System, users: &Users, gpu: &GpuByProcess) -> Vec<ProcessCpu> {
     let mut by_name: HashMap<String, AggregatedCpu> = HashMap::new();
 
     for (pid, proc_) in sys.processes() {
@@ -265,6 +286,7 @@ pub fn collect_top_cpu(sys: &System, users: &Users) -> Vec<ProcessCpu> {
         let entry = by_name.entry(name).or_default();
         entry.cpu_pct += cpu_pct;
         entry.members.mem_mb += proc_.memory() as f64 / (1024.0 * 1024.0);
+        entry.members.gpu_pct += gpu_of(gpu, pid_u);
         entry.members.pids.push(pid_u);
         // Keep a single representative pid per name group — the
         // highest-CPU one, so clicking through to "details" lands on the
@@ -304,6 +326,7 @@ pub fn collect_top_cpu(sys: &System, users: &Users) -> Vec<ProcessCpu> {
             name,
             username: agg.usernames.into_iter().collect::<Vec<_>>().join(", "),
             cpu: round2(agg.cpu_pct),
+            gpu: group_gpu(gpu, agg.members.gpu_pct),
             mem: round2(if pss {
                 group_pss_mb(sys, &agg.members)
             } else {

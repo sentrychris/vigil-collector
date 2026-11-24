@@ -5,7 +5,7 @@ withDefaults(
   defineProps<{
     title: string;
     icon?: string;
-    tone?: "blue" | "purple" | "amber" | "green" | "red" | "slate";
+    tone?: "blue" | "purple" | "pink" | "amber" | "green" | "red" | "slate";
   }>(),
   {
     tone: "blue",
@@ -83,6 +83,7 @@ const loader = useLoadingStore();
 }
 .stat-icon.tone-blue   { background: rgba(59, 130, 246, 0.15);  color: #60a5fa; box-shadow: inset 0 0 0 1px rgba(59,130,246,0.25); }
 .stat-icon.tone-purple { background: rgba(168, 85, 247, 0.15);  color: #c084fc; box-shadow: inset 0 0 0 1px rgba(168,85,247,0.25); }
+.stat-icon.tone-pink   { background: rgba(236, 72, 153, 0.15);  color: #f472b6; box-shadow: inset 0 0 0 1px rgba(236,72,153,0.25); }
 .stat-icon.tone-amber  { background: rgba(245, 158, 11, 0.15);  color: #fbbf24; box-shadow: inset 0 0 0 1px rgba(245,158,11,0.25); }
 .stat-icon.tone-green  { background: rgba(16, 185, 129, 0.15);  color: #34d399; box-shadow: inset 0 0 0 1px rgba(16,185,129,0.25); }
 .stat-icon.tone-red    { background: rgba(239, 68, 68, 0.15);   color: #f87171; box-shadow: inset 0 0 0 1px rgba(239,68,68,0.25); }

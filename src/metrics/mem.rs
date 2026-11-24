@@ -2,9 +2,11 @@ use sysinfo::System;
 
 use crate::snapshot::Mem;
 
+use super::smbios::Modules;
 use super::{bytes_to_gib, round1};
 
-pub fn collect(sys: &System) -> Mem {
+/// ``modules`` is what the firmware says is fitted, read once at startup.
+pub fn collect(sys: &System, modules: &Modules) -> Mem {
     // sysinfo's `available_memory` is the analogue of psutil's `available`:
     // memory that can be handed to a process without swapping. Using it as
     // the basis for `free` and `used` keeps `used + free == total` — the
@@ -24,5 +26,7 @@ pub fn collect(sys: &System) -> Mem {
         used: bytes_to_gib(used),
         free: bytes_to_gib(available),
         percent,
+        kind: modules.kind.clone(),
+        manufacturer: modules.manufacturer.clone(),
     }
 }

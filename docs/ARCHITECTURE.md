@@ -56,15 +56,21 @@ src/
 ├── snapshot.rs          shared data model + per-endpoint projections
 ├── sampler.rs           1 Hz tick loop, refresh state, ArcSwap JSON cache
 ├── metrics/             per-domain collectors (stateless over sysinfo)
-│   ├── cpu.rs           usage, freq, package temp, load average (Unix)
+│   ├── cpu.rs           model, usage, freq, package temp, load average (Unix)
 │   ├── temp_windows.rs  Windows CPU temp reader thread (shared memory, WMI, PDH)
 │   ├── temp_parse.rs    parsers for those sources (tested on every platform)
+│   ├── gpu.rs           the graphics card: which reader this platform has
+│   ├── gpu_windows.rs   Windows GPU reader thread (PDH counters, D3DKMT)
+│   ├── gpu_counters.rs  adds those counters up (tested on every platform)
+│   ├── gpu_linux.rs     Linux: what amdgpu publishes under /sys/class/drm
+│   ├── pdh.rs           Windows: one performance counter over all its instances
+│   ├── smbios.rs        kind and maker of the memory fitted, from the firmware
 │   ├── mem.rs           total/used/free/percent (psutil-compatible)
 │   ├── disk.rs          root + all mounts (statvfs / GetDiskFreeSpaceExW)
 │   │                    + I/O deltas (/proc/diskstats / IOCTL_DISK_PERFORMANCE)
 │   ├── net.rs           throughput delta + per-iface stats + /proc/net/dev
 │   ├── platform.rs      distro, kernel, uptime string, current user
-│   └── process.rs       top-N by memory and by CPU, PSS-or-RSS detection
+│   └── process.rs       top-N by memory and by CPU, PSS-or-RSS detection, GPU share
 ├── server/              axum HTTP + WS layer
 │   ├── mod.rs           public and private routers, AppState, serve()
 │   ├── control.rs       Panel (what Settings changes) and the /control API over it
@@ -90,6 +96,9 @@ every field is always present in the payload:
 | Disk usage | `statvfs` (psutil/df arithmetic) | `GetDiskFreeSpaceExW` | `statvfs` |
 | Disk I/O + IOPS | `/proc/diskstats`, whole disks | `IOCTL_DISK_PERFORMANCE` on `\\.\PhysicalDriveN` | zeros |
 | CPU temperature | sysinfo components, then `/sys/class/thermal` | HWiNFO / Afterburner shared memory, LibreHardwareMonitor WMI, live ACPI thermal zone, else `0` | sysinfo components |
+| GPU | `/sys/class/drm` (`amdgpu`), else `null` | "GPU Engine" / "GPU Adapter Memory" PDH counters, `D3DKMT` for name, memory size and temperature | `null` |
+| GPU per process | left out | the same counters, by pid | left out |
+| Memory type and maker | SMBIOS table, root only, else `""` | SMBIOS table (`GetSystemFirmwareTable`) | `""` |
 | Load average | `getloadavg(3)` | `null` | `getloadavg(3)` |
 | Process memory | PSS when readable, else RSS | working set (`"rss"`) | RSS |
 | Net drop counters | `/proc/net/dev` | `0` | `0` |

@@ -37,8 +37,10 @@ Node.js; platform-specific setup is under [Building](#building).
 
 ## What you get
 
-- **Live stream** of CPU, memory, disk, disk I/O, network throughput, and top
-  processes - one snapshot per second by default.
+- **Live stream** of CPU, GPU, memory, disk, disk I/O, network throughput, and
+  top processes - one snapshot per second by default.
+- **What the parts are**: the processor's model, the graphics card's, and
+  the kind of memory fitted and who made it.
 - **Multi-disk** for every mounted partition (every fixed/removable drive on
   Windows), with reserved-block accounting that matches `df` exactly.
 - **External health checks** using a configurable list of URLs. Hits `/probes`
@@ -264,7 +266,8 @@ In the tray, the log is written to the log file (see
 ### The Vigil window
 
 The window is a small monitor for a corner of the screen. It shows the
-platform, CPU, memory, disk and network each on one line with the last
+platform, CPU, GPU (on a machine with a graphics card Vigil can read),
+memory, disk and network each on one line with the last
 minute as a sparkline, the service checks (one line while all is well;
 press it to list them), and the busiest programs by CPU or memory (press
 a heading to sort by it).
@@ -472,13 +475,21 @@ Current snapshot of the host. Same payload that the WebSocket pushes.
 
 | Field | Type | Description |
 |---|---|---|
+| `cpu.name` | string | Processor model, tidied: `"Intel Core i7-11700"` (`""` if it doesn't say) |
 | `cpu.usage` | number | CPU utilization, % |
 | `cpu.temp` | number | Package temperature, °C (`0` if no sensor; see [Platform notes](#platform-notes) for Windows) |
 | `cpu.freq` | number | Current frequency, MHz |
 | `cpu.cores` | number | Logical core count |
 | `cpu.load` | array / null | 1/5/15-minute load average (`null` on Windows) |
+| `gpu` | object / null | The graphics card, or `null` where there is none Vigil can read (see [Platform notes](#gpu)). With several, the one with the most memory of its own |
+| `gpu.name` | string | Its model, e.g. `"NVIDIA GeForce RTX 3070"` |
+| `gpu.usage` | number | Utilization of its busiest engine, % (the figure Task Manager shows) |
+| `gpu.temp` | number | Temperature, °C (`0` if the driver doesn't report one) |
+| `gpu.mem.total` / `used` / `free` / `percent` | number | Video memory, GiB and % |
 | `mem.total` / `used` / `free` | number | RAM, GiB. `used + free == total` |
 | `mem.percent` | number | RAM utilization, % |
+| `mem.type` | string | Kind of memory fitted, e.g. `"DDR4"` (`""` if unknown; see [Platform notes](#memory-type-and-manufacturer)) |
+| `mem.manufacturer` | string | Who made the modules, e.g. `"Corsair"`; each maker in turn if they differ (`""` if unknown) |
 | `disk.total` / `used` / `free` | number | Primary partition (root or system drive), GiB |
 | `disk.percent` | number | Primary partition utilization, % |
 | `disks[]` | array | Every mounted partition: `device`, `mountpoint`, `fstype`, plus the same usage fields |
@@ -486,9 +497,9 @@ Current snapshot of the host. Same payload that the WebSocket pushes.
 | `disk_io.read_iops` / `write_iops` | number | Aggregate disk operations/sec |
 | `network.rx_bytes_per_sec` | number | Receive throughput (loopback excluded) |
 | `network.tx_bytes_per_sec` | number | Transmit throughput |
-| `processes[]` | array | Top 10 by memory, aggregated by process name. Each has `mem` (MiB) and `cpu` |
+| `processes[]` | array | Top 10 by memory, aggregated by process name. Each has `mem` (MiB) and `cpu`, and on Windows `gpu` (percent of the graphics card; left out elsewhere) |
 | `processes_metric` | string | `"pss"` or `"rss"` - tells the UI which accounting was used (`"rss"` = working set on Windows) |
-| `processes_by_cpu[]` | array | Top 10 by CPU %, aggregated by process name. Each has `cpu` (percent of one core, so it can pass 100) and `mem` |
+| `processes_by_cpu[]` | array | Top 10 by CPU %, aggregated by process name. Each has `cpu` (percent of one core, so it can pass 100) and `mem`, and on Windows `gpu` |
 | `platform.distro` / `kernel` / `uptime` | string | OS info + human-readable uptime |
 | `user` | string | Logged-in user |
 
@@ -545,7 +556,7 @@ const worker = await fetch("http://localhost:4500/worker", { method: "POST" })
 const ws = new WebSocket(`ws://localhost:4500/connect?id=${worker.id}`);
 ws.onmessage = (event) => {
   const snapshot = JSON.parse(event.data);
-  // { cpu, mem, disk, disk_io, network, uptime, processes, processes_metric, processes_by_cpu }
+  // { cpu, gpu, mem, disk, disk_io, network, uptime, processes, processes_metric, processes_by_cpu }
 };
 ```
 
@@ -560,6 +571,9 @@ WebSocket frees it. A connect refused with `503` (server at
 | Disk usage | `statvfs`, `df`-exact | `GetDiskFreeSpaceExW` | `statvfs` |
 | Disk I/O + IOPS | `/proc/diskstats` | `IOCTL_DISK_PERFORMANCE` per physical drive | not reported (`0`) |
 | CPU temperature | hwmon / thermal zones | from a monitoring app or a live ACPI thermal zone, else `0` (see below) | SMC sensors |
+| GPU | AMD cards (`amdgpu`), else `null` | any card, from Windows' own counters | `null` |
+| GPU use per process | not reported | yes | not reported |
+| Memory type and maker | as root only, else `""` | yes | `""` |
 | Load average | yes | `null` | yes |
 | Process memory | PSS when readable, else RSS | working set | RSS |
 | Dropped packets | yes | `0` | `0` |
@@ -571,6 +585,48 @@ On Windows, network throughput leaves out NDIS filter interfaces (such as
 "WiFi-VirtualBox NDIS Light-Weight Filter-0000"), which mirror the adapter
 underneath them and would otherwise count its traffic twice. Hyper-V / WSL
 virtual switches are kept, like `docker0` on Linux.
+
+### GPU
+
+On **Windows** Vigil reads the counters Windows' own graphics scheduler
+keeps, the ones behind Task Manager's GPU figures ("GPU Engine" and "GPU
+Adapter Memory", Windows 10 1709 and later). They cover every make of
+card, with no vendor library, driver or admin rights:
+
+- `gpu.usage` is the busiest engine (3D, video decode, compute, ...), each
+  added up over the processes using it. A card decoding video flat out
+  reads as busy even while its 3D engine idles.
+- `gpu` in the process lists is the same counters by process: how busy the
+  group's processes keep their busiest engine.
+- `gpu.mem` is the card's own video memory. Integrated graphics have only
+  a token amount of their own (under 512 MiB), so for those it is the
+  system memory they share instead.
+- `gpu.temp` is what the card's driver reports to Windows (WDDM 2.4 and
+  later). Most integrated graphics report none, and it reads `0`.
+
+With more than one card (integrated graphics and a card, say) the one with
+the most memory of its own is shown. Windows' software renderer and the
+display-only adapters that remote desktops add are never counted. A
+laptop's discrete card is left asleep while nothing uses it: its
+temperature is only asked for once something does.
+
+On **Linux** Vigil reads what the kernel's graphics drivers publish under
+`/sys/class/drm`, which today means AMD cards on the `amdgpu` driver.
+Intel's drivers publish no usage figure there, and NVIDIA's own driver
+publishes nothing there at all, so on those machines, on macOS, and on any
+machine with no graphics card, `gpu` is `null` and the dashboards simply
+leave the GPU card and gauge out.
+
+### Memory type and manufacturer
+
+`mem.type` and `mem.manufacturer` come from the machine's firmware (the
+SMBIOS "Memory Device" record of each fitted module), read once at
+startup. Windows hands that table to any program. Linux only lets root
+read it (`/sys/firmware/dmi/tables/DMI`), so there both are `""` unless
+Vigil runs as root. Some modules give their maker as a JEDEC number
+instead of a name; the common ones are turned back into names, and the
+rest are shown as they come. Firmware that says nothing useful ("Unknown",
+"To Be Filled By O.E.M.") leaves them `""`.
 
 ### CPU temperature on Windows
 

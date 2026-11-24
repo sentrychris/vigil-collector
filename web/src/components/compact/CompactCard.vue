@@ -6,15 +6,25 @@
 withDefaults(
   defineProps<{
     title: string;
+    /** What the part is called (the processor's model, say), written
+     *  small after the title in whatever room the line has left. */
+    name?: string;
     icon?: string;
-    tone?: "blue" | "purple" | "amber" | "green" | "cyan" | "red" | "slate";
+    tone?: "blue" | "purple" | "pink" | "amber" | "green" | "cyan" | "red" | "slate";
     /** The reading, already formatted, and its unit. */
     value?: string;
     unit?: string;
     /** A share from 0 to 100, drawn as a thin bar along the bottom. */
     bar?: number;
   }>(),
-  { icon: undefined, tone: "blue", value: undefined, unit: undefined, bar: undefined },
+  {
+    name: undefined,
+    icon: undefined,
+    tone: "blue",
+    value: undefined,
+    unit: undefined,
+    bar: undefined,
+  },
 );
 </script>
 
@@ -27,7 +37,10 @@ withDefaults(
         </slot>
       </div>
       <div class="card-text">
-        <div class="card-title" :title="title">{{ title }}</div>
+        <div class="card-heading">
+          <div class="card-title" :title="title">{{ title }}</div>
+          <div v-if="name" class="card-name" :title="name">{{ name }}</div>
+        </div>
         <div v-if="$slots.sub" class="card-sub"><slot name="sub" /></div>
       </div>
       <div v-if="$slots.spark" class="card-spark" :class="{ wide: value === undefined }">
@@ -65,6 +78,7 @@ withDefaults(
   min-width: 0;
 }
 .tone-purple { --tone: var(--t-purple); --tone-soft: rgba(168, 85, 247, 0.15); --tone-edge: rgba(168, 85, 247, 0.25); }
+.tone-pink   { --tone: var(--t-pink); --tone-soft: rgba(236, 72, 153, 0.15); --tone-edge: rgba(236, 72, 153, 0.25); }
 .tone-amber  { --tone: var(--t-amber); --tone-soft: rgba(245, 158, 11, 0.15); --tone-edge: rgba(245, 158, 11, 0.25); }
 .tone-green  { --tone: var(--t-green); --tone-soft: rgba(16, 185, 129, 0.15); --tone-edge: rgba(16, 185, 129, 0.25); }
 .tone-cyan   { --tone: var(--t-cyan); --tone-soft: rgba(34, 211, 238, 0.14); --tone-edge: rgba(34, 211, 238, 0.25); }
@@ -103,6 +117,26 @@ withDefaults(
   flex-direction: column;
   justify-content: center;
   gap: 2px;
+}
+.card-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+}
+/* The title keeps its width; the name takes what is left and is cut
+   short where that isn't enough. */
+.card-heading .card-title { flex: 0 1 auto; }
+.card-name {
+  flex: 1 1 0;
+  min-width: 0;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.15;
+  color: var(--c-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .card-title {
   font-size: 11px;

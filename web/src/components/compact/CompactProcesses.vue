@@ -32,6 +32,10 @@ const cores = computed(() => Math.max(1, source.value.cpu?.cores || 1));
 const cpuOf = (p: ProcessInformation) =>
   typeof p.cpu === "number" ? p.cpu / cores.value : null;
 
+// How much of the graphics card each uses, from a collector that can
+// tell (Windows). The column is only there when it can.
+const showGpu = computed(() => listed.value.some((p) => typeof p.gpu === "number"));
+
 const rows = computed(() => {
   const all = listed.value;
   const amount = (p: ProcessInformation) =>
@@ -43,6 +47,7 @@ const rows = computed(() => {
     title: p.username ? `${p.name} (${p.username})` : p.name,
     share: Math.min(100, Math.max(2, (amount(p) / most) * 100)),
     cpu: cpuText(cpuOf(p)),
+    gpu: cpuText(typeof p.gpu === "number" ? p.gpu : null),
     mem: memText(p.mem),
   }));
 });
@@ -94,6 +99,7 @@ const canShowMore = computed(() => listed.value.length > FEW);
               CPU
             </button>
           </th>
+          <th v-if="showGpu" class="col-num" scope="col">GPU</th>
           <th class="col-num col-mem" scope="col" :aria-sort="sortBy === 'mem' ? 'descending' : 'none'">
             <button
               type="button"
@@ -114,10 +120,11 @@ const canShowMore = computed(() => listed.value.length > FEW);
             <span class="share"><span class="share-fill" :style="{ width: row.share + '%' }"></span></span>
           </td>
           <td class="col-num">{{ row.cpu }}<span class="num-unit">%</span></td>
+          <td v-if="showGpu" class="col-num col-gpu">{{ row.gpu }}<span class="num-unit">%</span></td>
           <td class="col-num col-mem">{{ row.mem.value }}<span class="num-unit">{{ row.mem.unit }}</span></td>
         </tr>
         <tr v-if="rows.length === 0">
-          <td class="empty" colspan="4">Waiting for the first scan…</td>
+          <td class="empty" :colspan="showGpu ? 5 : 4">Waiting for the first scan…</td>
         </tr>
       </tbody>
     </table>

@@ -14,12 +14,45 @@ use crate::native::surface::{self, Frame, Surface};
 use crate::native::ui::{Charts, CompactWindow, Theme};
 use crate::native::{self, save_preview};
 use crate::server::probes::ProbeResult;
-use crate::snapshot::{Process, ProcessCpu, Snapshot};
+use crate::snapshot::{Gpu, GpuMemory, Process, ProcessCpu, Snapshot};
 
 const PAGE_DARK: [u8; 3] = [0x0a, 0x0e, 0x17];
 
 /// A made-up Windows machine, a little busy.
 pub(super) fn snapshot(second: u32) -> Snapshot {
+    let mut s = without_a_graphics_card(second);
+    let wave = f64::from(second % 12) / 12.0;
+    let used = 2.6 + wave / 4.0;
+    s.gpu = Some(Gpu {
+        name: "NVIDIA GeForce RTX 3070".into(),
+        usage: 14.0 + 38.0 * (wave * std::f64::consts::PI).sin(),
+        temp: 54.0,
+        mem: GpuMemory {
+            total: 8.0,
+            used,
+            free: 8.0 - used,
+            percent: used / 8.0 * 100.0,
+        },
+    });
+    // Who is using it, which the same machine can tell.
+    let share = |name: &str| match name {
+        "chrome" => 21.4,
+        "Discord" => 3.2,
+        "explorer" => 0.4,
+        _ => 0.0,
+    };
+    for p in &mut s.processes {
+        p.gpu = Some(share(&p.name));
+    }
+    for p in &mut s.processes_by_cpu {
+        p.gpu = Some(share(&p.name));
+    }
+    s
+}
+
+/// The same machine with no card Vigil can read, which is also how one
+/// looks anywhere but Windows as far as its processes go.
+pub(super) fn without_a_graphics_card(second: u32) -> Snapshot {
     let mut s = Snapshot::default();
     let wave = f64::from(second % 20) / 20.0;
     s.platform.distro = "Windows 11 Pro".into();
@@ -29,6 +62,9 @@ pub(super) fn snapshot(second: u32) -> Snapshot {
     s.cpu.freq = 3600.0;
     s.cpu.cores = 16;
     s.cpu.temp = 47.0;
+    s.cpu.name = "Intel Core i7-11700".into();
+    s.mem.kind = "DDR4".into();
+    s.mem.manufacturer = "Corsair".into();
     s.mem.total = 31.9;
     s.mem.used = 14.2 + wave;
     s.mem.free = s.mem.total - s.mem.used;
@@ -63,6 +99,7 @@ pub(super) fn snapshot(second: u32) -> Snapshot {
             username: "chris".into(),
             cpu: *cpu,
             mem: *mem,
+            gpu: None,
         })
         .collect();
     let mut by_memory: Vec<_> = names.to_vec();
@@ -76,6 +113,7 @@ pub(super) fn snapshot(second: u32) -> Snapshot {
             username: "chris".into(),
             mem: *mem,
             cpu: *cpu,
+            gpu: None,
         })
         .collect();
     s
@@ -108,6 +146,7 @@ struct Shown {
     ui: CompactWindow,
     surface: Rc<Surface>,
     history: Rc<RefCell<History>>,
+    readings: fn(u32) -> Snapshot,
     frame: Frame,
 }
 
@@ -115,6 +154,11 @@ impl Shown {
     /// The window after a minute of readings, at ``width`` by ``height``
     /// layout pixels and ``scale`` real pixels to each.
     fn new(width: u32, height: u32, scale: f32, dark: bool) -> Shown {
+        Shown::of(snapshot, width, height, scale, dark)
+    }
+
+    /// The same, of the machine ``readings`` makes up.
+    fn of(readings: fn(u32) -> Snapshot, width: u32, height: u32, scale: f32, dark: bool) -> Shown {
         let (ui, surface) = surface::open(CompactWindow::new).expect("the layout can be made");
         let history = Rc::new(RefCell::new(History::default()));
         view::draw_from(&ui, &history);
@@ -130,6 +174,7 @@ impl Shown {
             ui,
             surface,
             history,
+            readings,
             frame: Frame::default(),
         };
         for second in 0..60 {
@@ -141,7 +186,7 @@ impl Shown {
     }
 
     fn read(&mut self, second: u32) {
-        let snapshot = snapshot(second);
+        let snapshot = (self.readings)(second);
         self.history.borrow_mut().remember(&snapshot);
         view::show(&self.ui, &snapshot);
         view::redraw_sparklines(&self.ui);
@@ -183,20 +228,60 @@ fn apart(a: [u8; 3], b: [u8; 3]) -> u8 {
     (0..3).map(|i| a[i].abs_diff(b[i])).max().unwrap_or(0)
 }
 
+/// Where the memory card's bar is on a machine with no graphics card:
+/// under the bar, the platform card and the processor's.
+const MEMORY_BAR_Y: f32 = 33.0 + 8.0 + 46.0 + 6.0 + 46.0 + 6.0 + 45.5;
+/// How much further down everything is with the graphics card's card
+/// above it.
+const GPU_CARD: f32 = 46.0 + 6.0;
+const AMBER: [u8; 3] = [0xfb, 0xbf, 0x24];
+
 #[test]
 fn draws_the_dashboard_at_its_usual_size() {
-    let shown = Shown::new(420, 580, 1.0, true);
+    let shown = Shown::new(420, 632, 1.0, true);
     shown.save("compact-dark");
-    assert_eq!((shown.frame.width, shown.frame.height), (420, 580));
+    assert_eq!((shown.frame.width, shown.frame.height), (420, 632));
     // The title bar is the dark slate of the web version's, not the page.
     let bar = shown.at(60.0, 16.0);
     assert!(apart(bar, [0x17, 0x20, 0x31]) < 24, "{bar:?}");
     // Between two cards the page shows, tinted by its glows.
     assert!(apart(shown.at(4.0, 300.0), PAGE_DARK) < 60);
     // The memory card's bar is amber where it is filled and not beyond.
-    let bar_y = 33.0 + 8.0 + 46.0 + 6.0 + 46.0 + 6.0 + 45.5;
-    assert!(apart(shown.at(40.0, bar_y), [0xfb, 0xbf, 0x24]) < 40);
-    assert!(apart(shown.at(380.0, bar_y), [0xfb, 0xbf, 0x24]) > 100);
+    let bar_y = MEMORY_BAR_Y + GPU_CARD;
+    assert!(apart(shown.at(40.0, bar_y), AMBER) < 40);
+    assert!(apart(shown.at(380.0, bar_y), AMBER) > 100);
+}
+
+#[test]
+fn the_graphics_card_has_a_card_between_the_processor_and_memory() {
+    let shown = Shown::new(420, 632, 1.0, true);
+    // Where the memory card's bar would be without it is its own card,
+    // which has a pink sparkline and no bar.
+    assert!(apart(shown.at(40.0, MEMORY_BAR_Y), AMBER) > 100);
+    let pink = (236..332).any(|x| {
+        (MEMORY_BAR_Y as u32 - 36..MEMORY_BAR_Y as u32 - 8)
+            .any(|y| apart(shown.at(x as f32, y as f32), [0xf4, 0x72, 0xb6]) < 40)
+    });
+    assert!(pink, "no pink line where the card's sparkline should be");
+}
+
+#[test]
+fn a_machine_without_a_graphics_card_has_no_card_for_one() {
+    let shown = Shown::of(without_a_graphics_card, 420, 580, 1.0, true);
+    shown.save("compact-no-gpu");
+    // Memory follows the processor directly, as it always did.
+    assert!(apart(shown.at(40.0, MEMORY_BAR_Y), AMBER) < 40);
+    assert!(apart(shown.at(40.0, MEMORY_BAR_Y + GPU_CARD), AMBER) > 100);
+}
+
+#[test]
+fn a_graphics_card_that_turns_up_gets_its_card_then() {
+    let mut shown = Shown::of(without_a_graphics_card, 420, 632, 1.0, true);
+    assert!(apart(shown.at(40.0, MEMORY_BAR_Y), AMBER) < 40);
+    shown.readings = snapshot;
+    shown.read(61);
+    shown.paint();
+    assert!(apart(shown.at(40.0, MEMORY_BAR_Y + GPU_CARD), AMBER) < 40);
 }
 
 #[test]
@@ -216,7 +301,7 @@ fn draws_sharper_on_a_scaled_display() {
 
 #[test]
 fn the_light_theme_is_light() {
-    let shown = Shown::new(420, 580, 1.0, false);
+    let shown = Shown::new(420, 632, 1.0, false);
     shown.save("compact-light");
     let page = shown.at(4.0, 300.0);
     assert!(page.iter().all(|c| *c > 0xc0), "{page:?}");
@@ -245,10 +330,10 @@ fn a_failing_service_is_listed_without_being_asked() {
 
 #[test]
 fn pressing_view_all_lists_every_process() {
-    let mut shown = Shown::new(420, 700, 1.0, true);
+    let mut shown = Shown::new(420, 752, 1.0, true);
     // Five rows end where the panel does; the sixth would be under it.
     let sixth_row_y =
-        33.0 + 8.0 + 4.0 * 52.0 + 2.0 * 9.0 + 46.0 + 6.0 + 34.0 + 6.0 + 34.0 + 22.0 + 5.5 * 22.0;
+        33.0 + 8.0 + 5.0 * 52.0 + 2.0 * 9.0 + 46.0 + 6.0 + 34.0 + 6.0 + 34.0 + 22.0 + 5.5 * 22.0;
     let below = shown.at(100.0, sixth_row_y + 30.0);
     shown.click(380.0, sixth_row_y - 5.5 * 22.0 - 22.0 - 17.0);
     shown.save("compact-all-processes");

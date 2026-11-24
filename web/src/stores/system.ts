@@ -25,6 +25,7 @@ export const useSystemStore = defineStore("system", {
         usage: 0,
         cores: 0,
       },
+      gpu: null,
       mem: {
         total: 0,
         used: 0,
@@ -55,6 +56,7 @@ export const useSystemStore = defineStore("system", {
     // Kept here rather than in a chart so it survives a change of view.
     history: {
       cpu: [] as number[],
+      gpu: [] as number[],
       mem: [] as number[],
       diskIo: [] as number[],
       rx: [] as number[],
@@ -185,6 +187,7 @@ export const useSystemStore = defineStore("system", {
       this.realtime.processes = realtime.processes;
       this.realtime.processes_by_cpu = realtime.processes_by_cpu ?? [];
       remember(this.history.cpu, realtime.cpu?.usage);
+      remember(this.history.gpu, realtime.gpu?.usage ?? 0);
       remember(this.history.mem, realtime.mem?.percent);
       remember(
         this.history.diskIo,
