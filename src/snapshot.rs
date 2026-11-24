@@ -19,6 +19,9 @@ pub struct Snapshot {
     pub processes: Vec<Process>,
     pub processes_metric: String,
     pub processes_by_cpu: Vec<ProcessCpu>,
+    /// The ten using the graphics card most; empty where that can't be
+    /// told apart by process, and then left out of the payload.
+    pub processes_by_gpu: Vec<Process>,
     pub interfaces: Vec<String>,
     pub network_stats: BTreeMap<String, NetIfaceStats>,
 }
@@ -185,6 +188,8 @@ pub struct HttpSystemView<'a> {
     pub processes: &'a [Process],
     pub processes_metric: &'a str,
     pub processes_by_cpu: &'a [ProcessCpu],
+    #[serde(skip_serializing_if = "<[Process]>::is_empty")]
+    pub processes_by_gpu: &'a [Process],
 }
 
 /// WebSocket frame projection. Mirrors ``server/websocket/system.py`` —
@@ -202,6 +207,8 @@ pub struct WsSystemView<'a> {
     pub processes: &'a [Process],
     pub processes_metric: &'a str,
     pub processes_by_cpu: &'a [ProcessCpu],
+    #[serde(skip_serializing_if = "<[Process]>::is_empty")]
+    pub processes_by_gpu: &'a [Process],
 }
 
 /// HTTP `/network` projection. Mirrors ``server/http/network.py``.
@@ -226,6 +233,7 @@ impl Snapshot {
             processes: &self.processes,
             processes_metric: &self.processes_metric,
             processes_by_cpu: &self.processes_by_cpu,
+            processes_by_gpu: &self.processes_by_gpu,
         }
     }
 
@@ -241,6 +249,7 @@ impl Snapshot {
             processes: &self.processes,
             processes_metric: &self.processes_metric,
             processes_by_cpu: &self.processes_by_cpu,
+            processes_by_gpu: &self.processes_by_gpu,
         }
     }
 
@@ -319,6 +328,32 @@ mod tests {
             serde_json::to_value(snapshot.ws_view()).unwrap()["gpu"],
             expected
         );
+    }
+
+    #[test]
+    fn the_list_by_gpu_is_sent_only_where_there_is_one() {
+        let mut snapshot = Snapshot::default();
+        for json in [
+            serde_json::to_value(snapshot.http_view()).unwrap(),
+            serde_json::to_value(snapshot.ws_view()).unwrap(),
+        ] {
+            assert!(!json.as_object().unwrap().contains_key("processes_by_gpu"));
+        }
+        snapshot.processes_by_gpu = vec![Process {
+            pid: 1,
+            name: "game".into(),
+            username: "chris".into(),
+            mem: 1.0,
+            cpu: 2.0,
+            gpu: Some(63.5),
+        }];
+        for json in [
+            serde_json::to_value(snapshot.http_view()).unwrap(),
+            serde_json::to_value(snapshot.ws_view()).unwrap(),
+        ] {
+            assert_eq!(json["processes_by_gpu"][0]["name"], "game");
+            assert_eq!(json["processes_by_gpu"][0]["gpu"], 63.5);
+        }
     }
 
     #[test]

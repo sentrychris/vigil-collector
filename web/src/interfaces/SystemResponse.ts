@@ -23,6 +23,9 @@ export interface SystemResponse {
   platform: PlatformInformation;
   processes: ProcessInformation[];
   processes_by_cpu?: ProcessInformation[];
+  /** The ten using the graphics card most. Only from a collector that
+   *  can tell that apart by process (Windows). */
+  processes_by_gpu?: ProcessInformation[];
   user: string;
 }
 
@@ -36,4 +39,7 @@ export interface RealtimeSystemResponse {
   uptime?: string | null;
   processes: ProcessInformation[];
   processes_by_cpu?: ProcessInformation[];
+  /** The ten using the graphics card most. Only from a collector that
+   *  can tell that apart by process (Windows). */
+  processes_by_gpu?: ProcessInformation[];
 }

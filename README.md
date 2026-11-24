@@ -500,6 +500,7 @@ Current snapshot of the host. Same payload that the WebSocket pushes.
 | `processes[]` | array | Top 10 by memory, aggregated by process name. Each has `mem` (MiB) and `cpu`, and on Windows `gpu` (percent of the graphics card; left out elsewhere) |
 | `processes_metric` | string | `"pss"` or `"rss"` - tells the UI which accounting was used (`"rss"` = working set on Windows) |
 | `processes_by_cpu[]` | array | Top 10 by CPU %, aggregated by process name. Each has `cpu` (percent of one core, so it can pass 100) and `mem`, and on Windows `gpu` |
+| `processes_by_gpu[]` | array | Windows only (left out elsewhere): top 10 by `gpu`, aggregated by process name, with the busiest on the CPU after those using the card. Each has `gpu`, `cpu` and `mem` |
 | `platform.distro` / `kernel` / `uptime` | string | OS info + human-readable uptime |
 | `user` | string | Logged-in user |
 
@@ -556,7 +557,8 @@ const worker = await fetch("http://localhost:4500/worker", { method: "POST" })
 const ws = new WebSocket(`ws://localhost:4500/connect?id=${worker.id}`);
 ws.onmessage = (event) => {
   const snapshot = JSON.parse(event.data);
-  // { cpu, gpu, mem, disk, disk_io, network, uptime, processes, processes_metric, processes_by_cpu }
+  // { cpu, gpu, mem, disk, disk_io, network, uptime, processes, processes_metric, processes_by_cpu,
+  //   processes_by_gpu (Windows) }
 };
 ```
 

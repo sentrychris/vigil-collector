@@ -46,6 +46,7 @@ struct SamplerState {
     cached_processes: Vec<Process>,
     cached_processes_metric: String,
     cached_processes_by_cpu: Vec<ProcessCpu>,
+    cached_processes_by_gpu: Vec<Process>,
 }
 
 impl SamplerState {
@@ -80,6 +81,7 @@ impl SamplerState {
             cached_processes: Vec::new(),
             cached_processes_metric: String::from("rss"),
             cached_processes_by_cpu: Vec::new(),
+            cached_processes_by_gpu: Vec::new(),
         })
     }
 
@@ -126,6 +128,8 @@ impl SamplerState {
                 metrics::process::process_metric_label(&self.sys).to_string();
             self.cached_processes_by_cpu =
                 metrics::process::collect_top_cpu(&self.sys, &self.users, &gpu);
+            self.cached_processes_by_gpu =
+                metrics::process::collect_top_gpu(&self.sys, &self.users, &gpu);
         }
 
         // Slow, every-Mth-tick: re-scan the mount table to catch new
@@ -168,6 +172,7 @@ impl SamplerState {
             processes: self.cached_processes.clone(),
             processes_metric: self.cached_processes_metric.clone(),
             processes_by_cpu: self.cached_processes_by_cpu.clone(),
+            processes_by_gpu: self.cached_processes_by_gpu.clone(),
             interfaces,
             network_stats,
         }

@@ -51,6 +51,7 @@ export const useSystemStore = defineStore("system", {
       uptime: null,
       processes: [],
       processes_by_cpu: [],
+      processes_by_gpu: [],
     },
     // The last minute of live readings, oldest first, for sparklines.
     // Kept here rather than in a chart so it survives a change of view.
@@ -186,6 +187,7 @@ export const useSystemStore = defineStore("system", {
       this.$patch({ realtime });
       this.realtime.processes = realtime.processes;
       this.realtime.processes_by_cpu = realtime.processes_by_cpu ?? [];
+      this.realtime.processes_by_gpu = realtime.processes_by_gpu ?? [];
       remember(this.history.cpu, realtime.cpu?.usage);
       remember(this.history.gpu, realtime.gpu?.usage ?? 0);
       remember(this.history.mem, realtime.mem?.percent);
